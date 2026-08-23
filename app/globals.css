@@ -216,6 +216,79 @@ a {
   min-width: 0;
 }
 
+.add-client-col {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.add-client-col input {
+  width: 100%;
+}
+
+/* ── Email suggestions ─────────────────────────────────── */
+.suggest-block {
+  margin-top: 4px;
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(180deg, rgba(111, 207, 151, 0.06), transparent 70%);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggest-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--mint);
+}
+
+.suggest-head .spark {
+  color: var(--mint-bright);
+}
+
+.suggest-count {
+  background: rgba(111, 207, 151, 0.16);
+  color: var(--mint);
+  border-radius: 20px;
+  padding: 1px 9px;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.suggest-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+}
+
+.suggest-source {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn.suggest-accept {
+  padding: 6px 14px;
+  font-size: 12.5px;
+}
+
 /* ── Main panel ────────────────────────────────────────── */
 .main {
   padding: 26px 32px 60px;

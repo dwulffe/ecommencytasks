@@ -32,7 +32,8 @@ export async function middleware(req: NextRequest) {
   const isPublic =
     pathname === "/login" ||
     pathname.startsWith("/api/auth/login") ||
-    pathname.startsWith("/api/cron/");
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/inbound"); // token-gated inside the route
 
   if (isPublic) return NextResponse.next();
 

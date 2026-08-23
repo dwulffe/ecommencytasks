@@ -22,6 +22,10 @@ deploys to **Vercel** — put it on any subdomain like `tasks.ecommency.com`.
   priority badge (click to cycle High → Medium → Low), and a due date (click to
   set). Overdue and due-soon dates are highlighted.
 - **Filter** by Open / Done / All, and **sort** by priority, due date, or newest.
+- **Email → tasks (AI):** forward a client email to a special address and Claude
+  reads it, pulls out the action items, and drops them in a **“Suggested from
+  email”** area for that client — you click **Accept** to turn one into a real
+  task, or **×** to dismiss. See [Email → tasks](#email--tasks-ai).
 
 ---
 
@@ -81,6 +85,56 @@ tab (Storage → your database → `.env.local`). Then open <http://localhost:30
 | `APP_PASSWORD` | The password your team types to log in. |
 | `AUTH_SECRET` | A long random string used to sign the login cookie. `openssl rand -base64 32`. |
 | `POSTGRES_URL` | The database connection string. **Auto-added by Vercel** when you create the Postgres database; only set by hand for local dev. |
+| `ANTHROPIC_API_KEY` | For the email → tasks feature. Claude reads forwarded emails and extracts action items. Optional if you don't use that feature. |
+| `INBOUND_TOKEN` | Shared secret protecting the `/api/inbound` webhook. Optional if you don't use email → tasks. |
+| `EXTRACT_MODEL` | Optional. Which Claude model extracts tasks (default `claude-opus-5`). |
+
+---
+
+## Email → tasks (AI)
+
+Forward a client email to a special address; Claude reads it and suggests tasks.
+
+**How it flows:** an email-forwarding service receives the forwarded email → POSTs
+it to `/api/inbound` on your app → the app matches it to a client by email
+address/domain → Claude extracts the action items → they appear as **suggestions**
+you approve in the UI.
+
+### 1. Give each client an email/domain
+In the sidebar, when you add a client, fill in the **email or domain** field
+(e.g. `hello@yuzuco.com` or just `yuzuco.com`). That's how forwarded emails get
+matched to the right client. No match = the email is ignored.
+
+### 2. Add two environment variables (Vercel → Settings → Environment Variables)
+| Variable | Value |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | From <https://console.anthropic.com> → API Keys. |
+| `INBOUND_TOKEN` | Any random string — it protects the webhook. |
+
+Redeploy after adding them.
+
+### 3. Set up forwarding to the webhook
+Use any inbound-email service that can POST to a URL. **CloudMailin** is the
+simplest (gives you a ready-made address, no DNS needed):
+
+1. Sign up at <https://www.cloudmailin.com>, create an address. It gives you one
+   like `abc123@cloudmailin.net`.
+2. Set its **POST target / webhook URL** to:
+   `https://YOUR-APP.vercel.app/api/inbound?token=YOUR_INBOUND_TOKEN`
+   and the format to **JSON**.
+3. In Gmail, create a filter (or just BCC/forward manually) so client emails go
+   to that `@cloudmailin.net` address. Tip: filter on the client's domain so it
+   auto-forwards everything from them.
+
+That's it. Forward a client email and within a few seconds the extracted tasks
+show up under that client as **Suggested from email**.
+
+> Works with other providers too (Postmark, SendGrid Inbound Parse, Mailgun) — the
+> webhook accepts their JSON/form payloads. Point their inbound webhook at the same
+> `/api/inbound?token=...` URL.
+
+**Cost:** each forwarded email is one small Claude call — pennies at normal volume.
+Set `EXTRACT_MODEL=claude-haiku-4-5` to make it even cheaper.
 
 ---
 
@@ -114,11 +168,13 @@ Email is intentionally left out for now, but the wiring is ready:
 
 Two tables, created automatically on first use:
 
-**clients** — `id`, `name`, `created_at`
+**clients** — `id`, `name`, `email`, `created_at`
 **tasks** — `id`, `client_id`, `title`, `priority`, `due_date`, `done`,
 `created_at`, `completed_at`
+**suggestions** — `id`, `client_id`, `title`, `priority`, `due_date`,
+`source_subject`, `source_from`, `created_at` (pending email-extracted tasks)
 
-Deleting a client cascades to delete its tasks.
+Deleting a client cascades to delete its tasks and suggestions.
 
 ---
 

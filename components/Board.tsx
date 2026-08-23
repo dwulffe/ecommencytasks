@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
-import { Client, Task, Priority, PRIORITIES } from "@/lib/types";
+import { Client, Task, Suggestion, Priority, PRIORITIES } from "@/lib/types";
 
 type Filter = "all" | "active" | "done";
 type Sort = "priority" | "due" | "added";
@@ -14,6 +14,7 @@ export function Board() {
   const router = useRouter();
   const [clients, setClients] = useState<Client[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selected, setSelected] = useState<string | "all">("all");
   const [filter, setFilter] = useState<Filter>("active");
   const [sort, setSort] = useState<Sort>("priority");
@@ -27,14 +28,16 @@ export function Board() {
 
   async function refresh() {
     try {
-      const [c, t] = await Promise.all([
+      const [c, t, s] = await Promise.all([
         fetch("/api/clients").then((r) => r.json()),
         fetch("/api/tasks").then((r) => r.json()),
+        fetch("/api/suggestions").then((r) => r.json()),
       ]);
       if (c.error) throw new Error(c.error);
       if (t.error) throw new Error(t.error);
       setClients(c.clients || []);
       setTasks(t.tasks || []);
+      setSuggestions(s.suggestions || []);
     } catch (err) {
       flashError(err instanceof Error ? err.message : "Failed to load data");
     } finally {
@@ -80,17 +83,43 @@ export function Board() {
     [clients]
   );
 
+  const visibleSuggestions = useMemo(
+    () => suggestions.filter((s) => selected === "all" || s.clientId === selected),
+    [suggestions, selected]
+  );
+
   // ── Mutations ──────────────────────────────────────────
-  async function addClient(name: string) {
+  async function addClient(name: string, email: string) {
     const res = await fetch("/api/clients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, email }),
     });
     const data = await res.json();
     if (!res.ok) return flashError(data.error || "Could not add client");
     setClients((prev) => [...prev, data.client].sort((a, b) => a.name.localeCompare(b.name)));
     setSelected(data.client.id);
+  }
+
+  async function acceptSuggestion(id: string) {
+    setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    const res = await fetch(`/api/suggestions/${id}`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      flashError(data.error || "Could not accept suggestion");
+      refresh();
+      return;
+    }
+    setTasks((prev) => [data.task, ...prev]);
+  }
+
+  async function dismissSuggestion(id: string) {
+    setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    const res = await fetch(`/api/suggestions/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      flashError("Could not dismiss suggestion");
+      refresh();
+    }
   }
 
   async function removeClient(id: string) {
@@ -244,6 +273,26 @@ export function Board() {
             />
           )}
 
+          {visibleSuggestions.length > 0 && (
+            <div className="suggest-block">
+              <div className="suggest-head">
+                <span className="spark">✦</span>
+                Suggested from email
+                <span className="suggest-count">{visibleSuggestions.length}</span>
+              </div>
+              {visibleSuggestions.map((s) => (
+                <SuggestionCard
+                  key={s.id}
+                  suggestion={s}
+                  showClient={selected === "all"}
+                  clientName={clientName.get(s.clientId) || ""}
+                  onAccept={() => acceptSuggestion(s.id)}
+                  onDismiss={() => dismissSuggestion(s.id)}
+                />
+              ))}
+            </div>
+          )}
+
           <div className="task-list" style={{ marginTop: 14 }}>
             {loading ? null : visibleTasks.length === 0 ? (
               <EmptyState hasClients={clients.length > 0} filter={filter} />
@@ -275,16 +324,18 @@ export function Board() {
 
 // ── Sub-components ─────────────────────────────────────────
 
-function AddClient({ onAdd }: { onAdd: (name: string) => void }) {
+function AddClient({ onAdd }: { onAdd: (name: string, email: string) => void }) {
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   return (
     <form
-      className="add-client"
+      className="add-client-col"
       onSubmit={(e) => {
         e.preventDefault();
         if (name.trim()) {
-          onAdd(name.trim());
+          onAdd(name.trim(), email.trim());
           setName("");
+          setEmail("");
         }
       }}
     >
@@ -294,10 +345,56 @@ function AddClient({ onAdd }: { onAdd: (name: string) => void }) {
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
+      <input
+        type="text"
+        placeholder="Client email or domain (optional)"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
       <button className="btn" type="submit" disabled={!name.trim()}>
-        +
+        Add client
       </button>
     </form>
+  );
+}
+
+function SuggestionCard({
+  suggestion,
+  showClient,
+  clientName,
+  onAccept,
+  onDismiss,
+}: {
+  suggestion: Suggestion;
+  showClient: boolean;
+  clientName: string;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) {
+  const due = describeDue(suggestion.dueDate);
+  return (
+    <div className="suggest-card">
+      <div className="task-main">
+        <div className="task-title">{suggestion.title}</div>
+        <div className="suggest-source">
+          {showClient && clientName ? `${clientName} · ` : ""}
+          from “{suggestion.sourceSubject || "email"}”
+        </div>
+      </div>
+      <div className="task-meta">
+        <span className={`badge ${suggestion.priority.toLowerCase()}`}>
+          <span className="pdot" />
+          {suggestion.priority}
+        </span>
+        {suggestion.dueDate && <span className={`due ${due.cls}`}>{due.label}</span>}
+        <button className="btn suggest-accept" onClick={onAccept} title="Add as task">
+          Accept
+        </button>
+        <button className="kill" title="Dismiss" onClick={onDismiss}>
+          ×
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -29,10 +29,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const email = typeof body?.email === "string" ? body.email.trim() : "";
     if (!name) {
       return NextResponse.json({ error: "Client name is required" }, { status: 400 });
     }
-    const client = await addClient(name);
+    const client = await addClient(name, email);
     return NextResponse.json({ client }, { status: 201 });
   } catch (err) {
     return NextResponse.json({ error: message(err) }, { status: 500 });
