@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listClients, addClient, deleteClient } from "@/lib/sheets";
+import { listClients, addClient, deleteClient } from "@/lib/db";
 import { isAuthenticated } from "@/lib/auth";
 
 export const runtime = "nodejs";

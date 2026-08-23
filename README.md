@@ -2,12 +2,12 @@
 
 A simple, Asana-style task board for managing client work, branded in Ecommency's
 dark-green style. Add clients, give each one tasks with a **due date** and a
-**priority** (High / Medium / Low), and check them off when they're done. The
-database is a **Google Sheet** you own, and the app deploys to **Vercel** — put it
-on any subdomain like `tasks.ecommency.com`.
+**priority** (High / Medium / Low), and check them off when they're done. Data
+lives in a **Postgres database** (set up in two clicks on Vercel), and the app
+deploys to **Vercel** — put it on any subdomain like `tasks.ecommency.com`.
 
 - **Front end + API:** Next.js 14 (App Router)
-- **Database:** Google Sheets (two tabs — `Clients` and `Tasks`, created automatically)
+- **Database:** Vercel Postgres (Neon) — tables `clients` and `tasks`, created automatically
 - **Access:** one shared team password
 - **Email reminders:** not wired up yet, but the plumbing is in place — see
   [Adding email reminders](#adding-email-reminders)
@@ -22,46 +22,46 @@ on any subdomain like `tasks.ecommency.com`.
   priority badge (click to cycle High → Medium → Low), and a due date (click to
   set). Overdue and due-soon dates are highlighted.
 - **Filter** by Open / Done / All, and **sort** by priority, due date, or newest.
-- Everything is saved straight to your Google Sheet, so you can also read or edit
-  the data there directly.
 
 ---
 
-## 1. Set up the Google Sheet (the database)
+## Deploy to Vercel (start to finish)
 
-You need a Google service account so the app can read and write your sheet.
+### 1. Import the repo
+1. Go to <https://vercel.com/new> and **Import** `ecommencytasks`.
+2. Vercel detects **Next.js** automatically — leave the build settings as-is.
+3. Don't deploy yet — first add the database and env vars below.
 
-1. **Create a sheet.** Go to <https://sheets.google.com>, make a new blank
-   spreadsheet, and name it something like `Ecommency Tasks`. Copy its ID from
-   the URL — it's the long part between `/d/` and `/edit`:
-   `https://docs.google.com/spreadsheets/d/`**`THIS_IS_THE_ID`**`/edit`
-   You don't need to add any tabs or headers — the app creates the `Clients` and
-   `Tasks` tabs on first use.
+### 2. Create the database (this is the whole "database setup")
+1. In your new Vercel project, open the **Storage** tab → **Create Database**.
+2. Choose **Postgres** (powered by Neon) → pick the free plan → **Create**.
+3. When it asks, **connect it to this project**. That automatically adds the
+   `POSTGRES_URL` (and related) environment variables — you don't type them.
+4. The app creates its `clients` and `tasks` tables on first load. Nothing to do by hand.
 
-2. **Create a Google Cloud project.** Go to
-   <https://console.cloud.google.com/projectcreate>, create a project (any name).
+### 3. Add the app's env vars
+Under **Settings → Environment Variables**, add:
 
-3. **Enable the Sheets API.** In that project, open
-   <https://console.cloud.google.com/apis/library/sheets.googleapis.com> and click
-   **Enable**.
+| Variable | Value |
+| --- | --- |
+| `APP_PASSWORD` | The password your team types to log in. Pick anything. |
+| `AUTH_SECRET` | A long random string that signs the login cookie. Generate with `openssl rand -base64 32`. |
 
-4. **Create a service account.** Go to
-   <https://console.cloud.google.com/iam-admin/serviceaccounts>, click
-   **Create service account**, give it a name (e.g. `ecommency-tasks`), and
-   finish. You don't need to grant it any project roles.
+(The `POSTGRES_*` vars are already there from step 2.)
 
-5. **Make a key.** Click the new service account → **Keys** tab → **Add key** →
-   **Create new key** → **JSON**. A `.json` file downloads. Inside it you'll find
-   `client_email` and `private_key` — you'll use both below.
+### 4. Deploy
+Hit **Deploy**. You'll get a live `*.vercel.app` URL. Open it, log in with your
+`APP_PASSWORD`, and start adding clients and tasks.
 
-6. **Share the sheet with the service account.** Open your sheet, click
-   **Share**, and share it with the service account's `client_email` (looks like
-   `ecommency-tasks@your-project.iam.gserviceaccount.com`) as an **Editor**.
-   This is the step people forget — without it you'll get a permissions error.
+### 5. Point it at an Ecommency subdomain
+1. Project → **Settings → Domains** → add `tasks.ecommency.com` (or any subdomain).
+2. Vercel shows a **CNAME** record. In your DNS provider (wherever `ecommency.com`
+   is managed), add: `CNAME  tasks  →  cname.vercel-dns.com`
+3. Wait for it to verify (usually a few minutes). Live on your subdomain with HTTPS.
 
 ---
 
-## 2. Run it locally (optional)
+## Run it locally (optional)
 
 ```bash
 npm install
@@ -69,48 +69,18 @@ cp .env.example .env.local   # then fill in the values
 npm run dev
 ```
 
-Open <http://localhost:3000>. See [Environment variables](#environment-variables)
-for what each value is.
-
-> When pasting the private key into `.env.local`, keep it on one line wrapped in
-> double quotes with the literal `\n` sequences, exactly as it appears in the JSON
-> file. The app converts them back to real line breaks.
-
----
-
-## 3. Deploy to Vercel
-
-1. Push this project to a GitHub repo (already done if Claude set it up for you).
-2. Go to <https://vercel.com/new>, **Import** the repo. Framework preset is
-   detected as **Next.js** — no changes needed.
-3. Before deploying, add the environment variables (below) under
-   **Environment Variables**.
-4. Deploy. You'll get a `*.vercel.app` URL.
-
-### Put it on an Ecommency subdomain
-
-1. In the Vercel project → **Settings → Domains**, add `tasks.ecommency.com`
-   (or whatever subdomain you like).
-2. Vercel shows a **CNAME** record to add. In your DNS provider (wherever
-   `ecommency.com` is managed), add:
-   `CNAME  tasks  →  cname.vercel-dns.com`
-3. Wait for it to verify (usually a few minutes). Done — the app is live on your
-   subdomain with HTTPS.
+For `POSTGRES_URL` locally, copy it from your Vercel database's **`.env.local`**
+tab (Storage → your database → `.env.local`). Then open <http://localhost:3000>.
 
 ---
 
 ## Environment variables
 
-Set these in `.env.local` (local) **and** in Vercel → Settings → Environment
-Variables (production). See `.env.example` for a copy-paste template.
-
 | Variable | What it is |
 | --- | --- |
 | `APP_PASSWORD` | The password your team types to log in. |
-| `AUTH_SECRET` | A long random string used to sign the login cookie. Generate with `openssl rand -base64 32`. |
-| `GOOGLE_SHEET_ID` | The sheet ID from the URL (step 1). |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | The `client_email` from the JSON key. |
-| `GOOGLE_PRIVATE_KEY` | The `private_key` from the JSON key. In Vercel, paste it exactly as-is (real line breaks are fine). Locally, wrap in quotes and keep the `\n`s. |
+| `AUTH_SECRET` | A long random string used to sign the login cookie. `openssl rand -base64 32`. |
+| `POSTGRES_URL` | The database connection string. **Auto-added by Vercel** when you create the Postgres database; only set by hand for local dev. |
 
 ---
 
@@ -125,8 +95,7 @@ Email is intentionally left out for now, but the wiring is ready:
      Add `RESEND_API_KEY`, `REMINDER_FROM_EMAIL`, and `REMINDER_TO_EMAIL` env vars.
   2. In that route, replace the `TODO(email)` comment with a call that emails the
      `dueOrOverdue` list.
-  3. Add a `CRON_SECRET` env var (any random string) — the route already checks
-     for it.
+  3. Add a `CRON_SECRET` env var (any random string) — the route already checks for it.
   4. Add a `vercel.json` with a daily cron so Vercel calls the route each morning:
 
      ```json
@@ -143,14 +112,13 @@ Email is intentionally left out for now, but the wiring is ready:
 
 ## Data model
 
-The app manages two tabs in your sheet (created automatically):
+Two tables, created automatically on first use:
 
-**Clients** — `id`, `name`, `createdAt`
-**Tasks** — `id`, `clientId`, `title`, `priority`, `dueDate`, `done`,
-`createdAt`, `completedAt`
+**clients** — `id`, `name`, `created_at`
+**tasks** — `id`, `client_id`, `title`, `priority`, `due_date`, `done`,
+`created_at`, `completed_at`
 
-You can safely view and lightly edit these in Google Sheets; just don't rename the
-header row or the tab names.
+Deleting a client cascades to delete its tasks.
 
 ---
 
@@ -172,7 +140,7 @@ components/
   Board.tsx               the whole interactive board
   Logo.tsx                Ecommency mark (inline SVG)
 lib/
-  sheets.ts               Google Sheets data layer
+  db.ts                   Postgres data layer
   auth.ts                 password check + cookie signing
   types.ts                shared types
 middleware.ts             gates every page/route behind the password

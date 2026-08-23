@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listTasks, addTask } from "@/lib/sheets";
+import { listTasks, addTask } from "@/lib/db";
 import { isAuthenticated } from "@/lib/auth";
 import { PRIORITIES, Priority } from "@/lib/types";
 

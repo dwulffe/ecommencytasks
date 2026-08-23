@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listTasks, listClients } from "@/lib/sheets";
+import { listTasks, listClients } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
