@@ -8,19 +8,28 @@ import { Client, Task, Priority, PRIORITIES } from "./types";
  * The Neon HTTP driver works with either a pooled or a direct string.
  */
 function connectionString(): string {
-  const url =
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.DATABASE_URL_UNPOOLED ||
-    process.env.POSTGRES_URL_NON_POOLING;
-  if (!url) {
+  const candidates = [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_URL,
+    process.env.DATABASE_URL_UNPOOLED,
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_PRISMA_URL,
+  ];
+
+  // The Neon HTTP driver needs a real postgres:// TCP string. Ignore any
+  // leftover Prisma Accelerate URL (prisma+postgres://...) from a database
+  // that was created earlier and later swapped out.
+  const usable = candidates.find(
+    (u) => u && (u.startsWith("postgres://") || u.startsWith("postgresql://"))
+  );
+
+  if (!usable) {
     throw new Error(
-      "No Postgres connection string found. Set DATABASE_URL or POSTGRES_URL " +
-        "(the Vercel Postgres/Neon integration adds this automatically)."
+      "No usable Postgres connection string found. Connect a Neon (Serverless " +
+        "Postgres) database in Vercel → Storage; it adds DATABASE_URL automatically."
     );
   }
-  return url;
+  return usable;
 }
 
 type Row = Record<string, unknown>;
