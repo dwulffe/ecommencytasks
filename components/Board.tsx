@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
 import { Client, Task, Suggestion, Priority, PRIORITIES } from "@/lib/types";
@@ -465,8 +465,21 @@ function TaskRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
+  const dateRef = useRef<HTMLInputElement>(null);
 
   const due = describeDue(task.dueDate);
+
+  function openDatePicker() {
+    const el = dateRef.current;
+    if (!el) return;
+    // showPicker() is the reliable cross-browser way to open the native
+    // calendar on demand; fall back to focus() where it isn't supported.
+    try {
+      el.showPicker();
+    } catch {
+      el.focus();
+    }
+  }
 
   return (
     <div className={`task-row ${task.done ? "done" : ""}`}>
@@ -534,22 +547,34 @@ function TaskRow({
           {task.priority}
         </button>
 
-        <label className={`due ${due.cls}`} title="Set due date" style={{ cursor: "pointer" }}>
+        <button
+          type="button"
+          className={`due due-btn ${due.cls}`}
+          title="Set due date"
+          onClick={openDatePicker}
+        >
           {due.label}
           <input
+            ref={dateRef}
             type="date"
             value={task.dueDate}
             onChange={(e) => onDue(e.target.value)}
-            style={{
-              width: 0,
-              height: 0,
-              padding: 0,
-              border: "none",
-              opacity: 0,
-              position: "absolute",
-            }}
+            className="due-input"
+            tabIndex={-1}
+            aria-hidden="true"
           />
-        </label>
+        </button>
+
+        {task.dueDate && (
+          <button
+            className="kill"
+            title="Clear due date"
+            onClick={() => onDue("")}
+            style={{ marginLeft: -6 }}
+          >
+            ⌫
+          </button>
+        )}
 
         <button className="kill" title="Delete task" onClick={onDelete}>
           ×

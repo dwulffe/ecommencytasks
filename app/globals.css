@@ -485,6 +485,38 @@ a {
   color: var(--text-faint);
 }
 
+/* Clickable due-date control that opens the native date picker */
+.due-btn {
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.due-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+/* The real input stays hidden and non-interactive; the button opens the
+   picker via showPicker(). This anchors the native popup to the control. */
+.due-btn .due-input {
+  position: absolute;
+  left: 8px;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .task-row .kill {
   opacity: 0;
   color: var(--text-faint);
