@@ -355,13 +355,20 @@ a {
 
 .task-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 14px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 13px 16px;
   transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+/* Keep the checkbox and the right-hand meta aligned to the first line of a
+   wrapped title. */
+.task-row .checkbox,
+.task-row .task-meta {
+  margin-top: 1px;
 }
 
 .task-row:hover {
@@ -416,9 +423,9 @@ a {
   font-size: 15px;
   font-weight: 500;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .task-meta {
