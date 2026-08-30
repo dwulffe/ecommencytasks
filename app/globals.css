@@ -555,7 +555,7 @@ a {
   flex-wrap: wrap;
 }
 
-.add-task input.title {
+.add-task .title {
   flex: 1;
   min-width: 180px;
 }
@@ -564,7 +564,8 @@ a {
 input[type="text"],
 input[type="date"],
 input[type="password"],
-select {
+select,
+textarea {
   background: var(--bg);
   border: 1px solid var(--border-strong);
   color: var(--text);
@@ -575,12 +576,23 @@ select {
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
+/* Auto-growing text areas for writing/editing tasks */
+textarea.grow {
+  resize: none;
+  overflow: hidden;
+  line-height: 1.45;
+  font-family: inherit;
+  min-height: 0;
+  display: block;
+}
+
 input::placeholder {
   color: var(--text-faint);
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--mint-bright);
   box-shadow: 0 0 0 3px rgba(111, 207, 151, 0.12);
 }

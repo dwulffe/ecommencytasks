@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
 import { Client, Task, Suggestion, Priority, PRIORITIES } from "@/lib/types";
@@ -324,6 +324,22 @@ export function Board() {
 
 // ── Sub-components ─────────────────────────────────────────
 
+/** A textarea that soft-wraps and grows its height to fit its content. */
+function AutoTextarea({
+  value,
+  ...rest
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [value]);
+  return <textarea ref={ref} rows={1} value={value} {...rest} />;
+}
+
 function AddClient({ onAdd }: { onAdd: (name: string, email: string) => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -421,13 +437,19 @@ function AddTask({
         setDueDate("");
       }}
     >
-      <input
-        className="title"
-        type="text"
+      <AutoTextarea
+        className="title grow"
         placeholder="Add a task…"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         disabled={disabled}
+        onKeyDown={(e) => {
+          // Enter submits; Shift+Enter adds a line break.
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
+          }
+        }}
       />
       <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>
         {PRIORITIES.map((p) => (
@@ -501,8 +523,8 @@ function TaskRow({
 
       <div className="task-main">
         {editing ? (
-          <input
-            type="text"
+          <AutoTextarea
+            className="grow"
             value={draft}
             autoFocus
             onChange={(e) => setDraft(e.target.value)}
@@ -512,7 +534,11 @@ function TaskRow({
               else setDraft(task.title);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              // Enter saves; Shift+Enter adds a line break; Escape cancels.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
               if (e.key === "Escape") {
                 setDraft(task.title);
                 setEditing(false);
