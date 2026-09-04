@@ -560,6 +560,9 @@ function TaskRow({
             {clientName}
           </div>
         )}
+        {task.done && task.completedAt && (
+          <div className="completed-at">✓ Completed {formatCompleted(task.completedAt)}</div>
+        )}
       </div>
 
       <div className="task-meta">
@@ -641,6 +644,18 @@ function EmptyState({ hasClients, filter }: { hasClients: boolean; filter: Filte
 function nextPriority(p: Priority): Priority {
   const order: Priority[] = ["High", "Medium", "Low"];
   return order[(order.indexOf(p) + 1) % order.length];
+}
+
+function formatCompleted(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function dueSortValue(dueDate: string): number {
