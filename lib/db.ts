@@ -94,7 +94,7 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS timer_started_at TIMESTAMPTZ`;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS time_spent_seconds INTEGER NOT NULL DEFAULT 0`;
 
-      await seedAdmin(sql);
+      await ensureAdmin(sql);
     })().catch((err) => {
       // Reset so a later request can retry after a transient failure.
       schemaReady = null;
@@ -131,17 +131,25 @@ function rowToUser(r: Row): User {
   };
 }
 
-/** Create the first admin from env if no admin exists yet (no lockout). */
-async function seedAdmin(sql: SqlTag): Promise<void> {
-  const existing = await sql`SELECT id FROM users WHERE role = 'admin' LIMIT 1`;
-  if (existing.length > 0) return;
+/**
+ * Keep the admin login in sync with the environment. The env vars are the
+ * source of truth: on every cold start we (re)set the admin's password to
+ * ADMIN_PASSWORD (falling back to APP_PASSWORD). So changing the env var and
+ * redeploying always updates the admin login — no lockouts.
+ */
+async function ensureAdmin(sql: SqlTag): Promise<void> {
   const username = (process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD || process.env.APP_PASSWORD;
-  if (!password) return; // nothing to seed with — set ADMIN_PASSWORD or APP_PASSWORD
-  await sql`
-    INSERT INTO users (id, username, name, password_hash, role)
-    VALUES (${randomUUID()}, ${username}, ${"Admin"}, ${hashPassword(password)}, ${"admin"})
-    ON CONFLICT (username) DO NOTHING`;
+  if (!password) return; // can't manage the admin without a password set
+  const hash = hashPassword(password);
+  const existing = await sql`SELECT id FROM users WHERE username = ${username}`;
+  if (existing.length > 0) {
+    await sql`UPDATE users SET password_hash = ${hash}, role = 'admin' WHERE username = ${username}`;
+  } else {
+    await sql`
+      INSERT INTO users (id, username, name, password_hash, role)
+      VALUES (${randomUUID()}, ${username}, ${"Admin"}, ${hash}, ${"admin"})`;
+  }
 }
 
 export async function getUserByUsername(username: string): Promise<User | null> {
