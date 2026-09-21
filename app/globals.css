@@ -991,6 +991,44 @@ input[type="date"] {
   padding-top: 12px;
 }
 
+/* Expandable person rows → their completed tasks */
+.report-row {
+  cursor: pointer;
+}
+.report-row:hover td {
+  background: var(--panel-2);
+}
+
+.report-person .chev {
+  display: inline-block;
+  width: 14px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.report-subrow td {
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  padding: 9px 8px 9px 22px;
+}
+
+.subtask-title {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.subtask-meta {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.subtask-empty {
+  color: var(--text-faint);
+  font-size: 13px;
+  padding-left: 22px;
+}
+
 /* ── Login ─────────────────────────────────────────────── */
 .login-wrap {
   min-height: 100vh;

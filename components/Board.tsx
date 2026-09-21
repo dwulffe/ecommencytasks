@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
 import { Client, Task, Suggestion, User, Priority, Role, PRIORITIES } from "@/lib/types";
@@ -419,12 +419,31 @@ interface ReportRow {
   totalSeconds: number;
 }
 
+interface ReportTask {
+  id: string;
+  title: string;
+  clientName: string;
+  assigneeId: string;
+  completedAt: string;
+  timeSpentSeconds: number;
+}
+
 function ReportModal({ onClose }: { onClose: () => void }) {
   const [start, setStart] = useState(() => monthStart());
   const [end, setEnd] = useState(() => localDate(new Date()));
   const [rows, setRows] = useState<ReportRow[]>([]);
+  const [tasks, setTasks] = useState<ReportTask[]>([]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  function toggle(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -435,7 +454,10 @@ function ReportModal({ onClose }: { onClose: () => void }) {
         const res = await fetch(`/api/report?start=${start}&end=${end}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to load report");
-        if (!cancelled) setRows(data.rows || []);
+        if (!cancelled) {
+          setRows(data.rows || []);
+          setTasks(data.tasks || []);
+        }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load report");
       } finally {
@@ -510,18 +532,50 @@ function ReportModal({ onClose }: { onClose: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.assigneeId || "unassigned"}>
-                    <td>
-                      <div className="report-person">{r.name}</div>
-                      <div className="report-bar">
-                        <span style={{ width: `${(r.totalSeconds / max) * 100}%` }} />
-                      </div>
-                    </td>
-                    <td className="num">{r.taskCount}</td>
-                    <td className="num strong">{formatDuration(r.totalSeconds)}</td>
-                  </tr>
-                ))}
+                {rows.map((r) => {
+                  const key = r.assigneeId || "unassigned";
+                  const isOpen = expanded.has(key);
+                  const mine = tasks.filter((t) => t.assigneeId === r.assigneeId);
+                  return (
+                    <Fragment key={key}>
+                      <tr className="report-row" onClick={() => toggle(key)}>
+                        <td>
+                          <div className="report-person">
+                            <span className="chev">{isOpen ? "▾" : "▸"}</span>
+                            {r.name}
+                          </div>
+                          <div className="report-bar">
+                            <span style={{ width: `${(r.totalSeconds / max) * 100}%` }} />
+                          </div>
+                        </td>
+                        <td className="num">{r.taskCount}</td>
+                        <td className="num strong">{formatDuration(r.totalSeconds)}</td>
+                      </tr>
+                      {isOpen &&
+                        (mine.length === 0 ? (
+                          <tr className="report-subrow">
+                            <td colSpan={3} className="subtask-empty">
+                              No completed tasks in this range.
+                            </td>
+                          </tr>
+                        ) : (
+                          mine.map((t) => (
+                            <tr className="report-subrow" key={t.id}>
+                              <td>
+                                <div className="subtask-title">{t.title}</div>
+                                <div className="subtask-meta">
+                                  {t.clientName ? `${t.clientName} · ` : ""}
+                                  completed {shortDate(t.completedAt)}
+                                </div>
+                              </td>
+                              <td />
+                              <td className="num">{formatDuration(t.timeSpentSeconds)}</td>
+                            </tr>
+                          ))
+                        ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr>
@@ -1031,6 +1085,12 @@ function lastMonthStart(): string {
 function lastMonthEnd(): string {
   const d = new Date();
   return localDate(new Date(d.getFullYear(), d.getMonth(), 0)); // day 0 = last day of prev month
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function dueSortValue(dueDate: string): number {

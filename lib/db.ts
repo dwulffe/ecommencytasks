@@ -387,6 +387,38 @@ export async function reportByUser(start: string, end: string): Promise<ReportRo
   }));
 }
 
+export interface ReportTask {
+  id: string;
+  title: string;
+  clientName: string;
+  assigneeId: string;
+  completedAt: string;
+  timeSpentSeconds: number;
+}
+
+/** The individual tasks completed within [start, end], for the report drill-down. */
+export async function reportCompletedTasks(start: string, end: string): Promise<ReportTask[]> {
+  await ensureSchema();
+  const rows = await db()`
+    SELECT t.id, t.title, t.assignee_id, t.time_spent_seconds, t.completed_at,
+           c.name AS client_name
+    FROM tasks t
+    LEFT JOIN clients c ON c.id = t.client_id
+    WHERE t.done = true
+      AND t.completed_at IS NOT NULL
+      AND t.completed_at::date >= ${start}::date
+      AND t.completed_at::date <= ${end}::date
+    ORDER BY t.completed_at DESC`;
+  return rows.map((r) => ({
+    id: String(r.id),
+    title: String(r.title),
+    clientName: String(r.client_name || ""),
+    assigneeId: r.assignee_id ? String(r.assignee_id) : "",
+    completedAt: iso(r.completed_at),
+    timeSpentSeconds: Number(r.time_spent_seconds ?? 0),
+  }));
+}
+
 function rowToTask(r: Record<string, unknown>): Task {
   return {
     id: String(r.id),

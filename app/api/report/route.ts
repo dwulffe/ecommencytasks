@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, reportByUser } from "@/lib/db";
+import { getCurrentUser, reportByUser, reportCompletedTasks } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,8 +18,11 @@ export async function GET(req: NextRequest) {
     if (!DATE_RE.test(start) || !DATE_RE.test(end)) {
       return NextResponse.json({ error: "start and end must be YYYY-MM-DD" }, { status: 400 });
     }
-    const rows = await reportByUser(start, end);
-    return NextResponse.json({ rows });
+    const [rows, tasks] = await Promise.all([
+      reportByUser(start, end),
+      reportCompletedTasks(start, end),
+    ]);
+    return NextResponse.json({ rows, tasks });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Something went wrong";
     return NextResponse.json({ error: msg }, { status: 500 });
