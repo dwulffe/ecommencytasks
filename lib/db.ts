@@ -345,6 +345,40 @@ export async function deleteTask(id: string): Promise<void> {
   await db()`DELETE FROM tasks WHERE id = ${id}`;
 }
 
+export interface ReportRow {
+  assigneeId: string;
+  name: string;
+  taskCount: number;
+  totalSeconds: number;
+}
+
+/**
+ * Time logged per person on tasks COMPLETED within [start, end] (inclusive,
+ * dates as YYYY-MM-DD). Time is bucketed by each task's completion date, since
+ * that's the only timestamp we have for a task's total logged time.
+ */
+export async function reportByUser(start: string, end: string): Promise<ReportRow[]> {
+  await ensureSchema();
+  const rows = await db()`
+    SELECT t.assignee_id, u.name, u.username,
+           COALESCE(SUM(t.time_spent_seconds), 0)::int AS total_seconds,
+           COUNT(*)::int AS task_count
+    FROM tasks t
+    LEFT JOIN users u ON u.id = t.assignee_id
+    WHERE t.done = true
+      AND t.completed_at IS NOT NULL
+      AND t.completed_at::date >= ${start}::date
+      AND t.completed_at::date <= ${end}::date
+    GROUP BY t.assignee_id, u.name, u.username
+    ORDER BY total_seconds DESC`;
+  return rows.map((r) => ({
+    assigneeId: r.assignee_id ? String(r.assignee_id) : "",
+    name: String(r.name || r.username || "Unassigned"),
+    taskCount: Number(r.task_count ?? 0),
+    totalSeconds: Number(r.total_seconds ?? 0),
+  }));
+}
+
 function rowToTask(r: Record<string, unknown>): Task {
   return {
     id: String(r.id),

@@ -30,6 +30,7 @@ export function Board() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const [reportOpen, setReportOpen] = useState(false);
 
   const isAdmin = me?.role === "admin";
 
@@ -345,6 +346,11 @@ export function Board() {
                 <option value="due">Sort: Due date</option>
                 <option value="added">Sort: Newest</option>
               </select>
+              {isAdmin && (
+                <button className="btn ghost" onClick={() => setReportOpen(true)}>
+                  ⏱ Time report
+                </button>
+              )}
             </div>
           </div>
 
@@ -400,7 +406,134 @@ export function Board() {
         </main>
       </div>
 
+      {reportOpen && <ReportModal onClose={() => setReportOpen(false)} />}
       {error && <div className="toast">{error}</div>}
+    </div>
+  );
+}
+
+interface ReportRow {
+  assigneeId: string;
+  name: string;
+  taskCount: number;
+  totalSeconds: number;
+}
+
+function ReportModal({ onClose }: { onClose: () => void }) {
+  const [start, setStart] = useState(() => monthStart());
+  const [end, setEnd] = useState(() => localDate(new Date()));
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setErr("");
+      try {
+        const res = await fetch(`/api/report?start=${start}&end=${end}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load report");
+        if (!cancelled) setRows(data.rows || []);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end]);
+
+  const max = Math.max(1, ...rows.map((r) => r.totalSeconds));
+  const grandSeconds = rows.reduce((s, r) => s + r.totalSeconds, 0);
+  const grandTasks = rows.reduce((s, r) => s + r.taskCount, 0);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h2 className="modal-title">Time report</h2>
+            <div className="modal-sub">Hours logged per person on tasks completed in the range.</div>
+          </div>
+          <button className="kill modal-close" onClick={onClose} title="Close">
+            ×
+          </button>
+        </div>
+
+        <div className="report-controls">
+          <div className="report-presets">
+            {(
+              [
+                ["This week", weekStart(), localDate(new Date())],
+                ["This month", monthStart(), localDate(new Date())],
+                ["Last 30 days", daysAgo(29), localDate(new Date())],
+                ["Last month", lastMonthStart(), lastMonthEnd()],
+              ] as [string, string, string][]
+            ).map(([label, s, e]) => (
+              <button
+                key={label}
+                className={`preset ${start === s && end === e ? "on" : ""}`}
+                onClick={() => {
+                  setStart(s);
+                  setEnd(e);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="report-range">
+            <input type="date" value={start} max={end} onChange={(e) => setStart(e.target.value)} />
+            <span className="range-dash">→</span>
+            <input type="date" value={end} min={start} onChange={(e) => setEnd(e.target.value)} />
+          </div>
+        </div>
+
+        {err && <div className="report-err">{err}</div>}
+
+        <div className="report-body">
+          {loading ? (
+            <div className="report-empty">Loading…</div>
+          ) : rows.length === 0 ? (
+            <div className="report-empty">No completed tasks with logged time in this range.</div>
+          ) : (
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th className="num">Tasks</th>
+                  <th className="num">Time logged</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.assigneeId || "unassigned"}>
+                    <td>
+                      <div className="report-person">{r.name}</div>
+                      <div className="report-bar">
+                        <span style={{ width: `${(r.totalSeconds / max) * 100}%` }} />
+                      </div>
+                    </td>
+                    <td className="num">{r.taskCount}</td>
+                    <td className="num strong">{formatDuration(r.totalSeconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td className="num">{grandTasks}</td>
+                  <td className="num strong">{formatDuration(grandSeconds)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -861,6 +994,43 @@ function formatCompleted(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+// ── Date helpers for the report presets (all local dates) ──
+
+function localDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function monthStart(): string {
+  const d = new Date();
+  return localDate(new Date(d.getFullYear(), d.getMonth(), 1));
+}
+
+function weekStart(): string {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // days since Monday
+  d.setDate(d.getDate() - dow);
+  return localDate(d);
+}
+
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return localDate(d);
+}
+
+function lastMonthStart(): string {
+  const d = new Date();
+  return localDate(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+}
+
+function lastMonthEnd(): string {
+  const d = new Date();
+  return localDate(new Date(d.getFullYear(), d.getMonth(), 0)); // day 0 = last day of prev month
 }
 
 function dueSortValue(dueDate: string): number {

@@ -827,6 +827,170 @@ input[type="date"] {
   border: 1px solid var(--danger);
 }
 
+/* ── Time report modal ─────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 5, 0.66);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 60;
+}
+
+.modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  padding: 24px 24px 20px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.modal-title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 3px;
+}
+
+.modal-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.modal-close {
+  opacity: 1;
+  font-size: 20px;
+}
+
+.report-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.report-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset {
+  font-size: 12.5px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.preset:hover {
+  color: var(--text);
+}
+
+.preset.on {
+  background: var(--mint-bright);
+  color: #06120b;
+  border-color: var(--mint-bright);
+  font-weight: 700;
+}
+
+.report-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.range-dash {
+  color: var(--text-faint);
+}
+
+.report-err {
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.report-empty {
+  text-align: center;
+  padding: 34px 10px;
+  color: var(--text-faint);
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.report-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  font-weight: 700;
+  padding: 0 8px 10px;
+}
+
+.report-table th.num,
+.report-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.report-table td {
+  padding: 11px 8px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.report-table td.strong {
+  font-weight: 700;
+  color: var(--mint);
+}
+
+.report-person {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.report-bar {
+  height: 6px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.report-bar span {
+  display: block;
+  height: 100%;
+  background: var(--mint-bright);
+  border-radius: 6px;
+  min-width: 2px;
+}
+
+.report-table tfoot td {
+  border-top: 1px solid var(--border-strong);
+  font-weight: 700;
+  padding-top: 12px;
+}
+
 /* ── Login ─────────────────────────────────────────────── */
 .login-wrap {
   min-height: 100vh;
