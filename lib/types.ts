@@ -2,6 +2,16 @@ export type Priority = "High" | "Medium" | "Low";
 
 export const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
+export type Role = "admin" | "employee";
+
+export interface User {
+  id: string;
+  username: string;
+  name: string;
+  role: Role;
+  createdAt: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -33,4 +43,12 @@ export interface Task {
   done: boolean;
   createdAt: string;
   completedAt: string;
+  /** User id this task is assigned to, or "" if unassigned. */
+  assigneeId: string;
+  /** Display name of the assignee (filled on read), or "". */
+  assigneeName: string;
+  /** ISO timestamp the timer was started, or "" if not running. */
+  timerStartedAt: string;
+  /** Total seconds logged against this task (excludes any currently-running interval). */
+  timeSpentSeconds: number;
 }

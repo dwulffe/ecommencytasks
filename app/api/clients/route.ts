@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listClients, addClient, deleteClient } from "@/lib/db";
-import { isAuthenticated } from "@/lib/auth";
+import { listClients, addClient, deleteClient, getCurrentUser } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function guard() {
-  if (!isAuthenticated()) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  return null;
-}
-
+// Any signed-in user can read the client list (needed to show client names on
+// their tasks); only admins can add or delete clients.
 export async function GET() {
-  const denied = guard();
-  if (denied) return denied;
+  const me = await getCurrentUser();
+  if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const clients = await listClients();
     return NextResponse.json({ clients });
@@ -24,8 +18,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = guard();
-  if (denied) return denied;
+  const me = await getCurrentUser();
+  if (!me || me.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const body = await req.json();
     const name = typeof body?.name === "string" ? body.name.trim() : "";
@@ -41,8 +37,10 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const denied = guard();
-  if (denied) return denied;
+  const me = await getCurrentUser();
+  if (!me || me.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const id = new URL(req.url).searchParams.get("id");
     if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });

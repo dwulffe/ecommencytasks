@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { acceptSuggestion, dismissSuggestion } from "@/lib/db";
-import { isAuthenticated } from "@/lib/auth";
+import { acceptSuggestion, dismissSuggestion, getCurrentUser } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function guard() {
-  if (!isAuthenticated()) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function guard() {
+  const me = await getCurrentUser();
+  if (!me || me.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;
 }
 
 /** Accept a suggestion → creates a real task. Body: { action: "accept" }. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const denied = guard();
+  const denied = await guard();
   if (denied) return denied;
   try {
     const task = await acceptSuggestion(params.id);
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
 /** Dismiss a suggestion without creating a task. */
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  const denied = guard();
+  const denied = await guard();
   if (denied) return denied;
   try {
     await dismissSuggestion(params.id);

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { listSuggestions } from "@/lib/db";
-import { isAuthenticated } from "@/lib/auth";
+import { listSuggestions, getCurrentUser } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  if (!isAuthenticated()) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const me = await getCurrentUser();
+  if (!me || me.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
     const suggestions = await listSuggestions();

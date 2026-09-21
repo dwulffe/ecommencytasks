@@ -115,6 +115,150 @@ a {
   min-height: 0;
 }
 
+.layout.solo {
+  grid-template-columns: 1fr;
+}
+
+/* Signed-in user + role tag in the top bar */
+.whoami {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+
+.role-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-faint);
+}
+
+.role-tag.admin {
+  color: var(--mint);
+  border-color: var(--mint-dim);
+  background: rgba(111, 207, 151, 0.1);
+}
+
+/* Team management panel */
+.team-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+
+.team-item:hover {
+  background: var(--panel);
+}
+
+.team-item .name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.team-item .kill {
+  opacity: 0;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  padding: 2px 4px;
+}
+
+.team-item:hover .kill {
+  opacity: 1;
+}
+.team-item .kill:hover {
+  color: var(--danger);
+}
+
+/* Assignee row under a task title */
+.task-subline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.assignee-select {
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.assignee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 20px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--mint);
+  font-weight: 600;
+}
+
+/* Per-task timer */
+.timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 20px;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.timer-btn:hover {
+  color: var(--text);
+  border-color: var(--mint-dim);
+}
+
+.timer-btn.running {
+  color: var(--mint-bright);
+  border-color: var(--mint-bright);
+  background: rgba(111, 207, 151, 0.12);
+}
+
+.timer-time {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+}
+
+.timer-time.live {
+  color: var(--mint-bright);
+}
+
 /* ── Sidebar ───────────────────────────────────────────── */
 .sidebar {
   border-right: 1px solid var(--border);

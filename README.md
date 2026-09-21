@@ -7,8 +7,11 @@ lives in a **Postgres database** (set up in two clicks on Vercel), and the app
 deploys to **Vercel** — put it on any subdomain like `tasks.ecommency.com`.
 
 - **Front end + API:** Next.js 14 (App Router)
-- **Database:** Vercel Postgres (Neon) — tables `clients` and `tasks`, created automatically
-- **Access:** one shared team password
+- **Database:** Vercel Postgres (Neon) — tables created automatically
+- **Access:** per-user logins with roles. **Admins** see everything and manage
+  people; **employees** see only tasks assigned to them.
+- **Time tracking:** each task has a Start/Pause timer; completing a task banks
+  the time, shown against the completed task.
 - **Email reminders:** not wired up yet, but the plumbing is in place — see
   [Adding email reminders](#adding-email-reminders)
 
@@ -48,10 +51,18 @@ Under **Settings → Environment Variables**, add:
 
 | Variable | Value |
 | --- | --- |
-| `APP_PASSWORD` | The password your team types to log in. Pick anything. |
+| `ADMIN_USERNAME` | Your admin login username (e.g. `admin`). |
+| `ADMIN_PASSWORD` | Your admin password. The admin account is auto-created from these on first run. |
 | `AUTH_SECRET` | A long random string that signs the login cookie. Generate with `openssl rand -base64 32`. |
 
-(The `POSTGRES_*` vars are already there from step 2.)
+(The `POSTGRES_*` vars are already there from step 2. If you previously set
+`APP_PASSWORD`, it still works as a fallback for `ADMIN_PASSWORD`.)
+
+**Roles & logins:** Log in as the admin, then open the **Team** panel in the
+sidebar to add employees (username + password). Employees sign in with those and
+see only the tasks you assign to them. You assign a task via the dropdown under
+its title. Each task has a Start/Pause timer; marking a task done stops the timer
+and records the total time.
 
 ### 4. Deploy
 Hit **Deploy**. You'll get a live `*.vercel.app` URL. Open it, log in with your
@@ -168,13 +179,16 @@ Email is intentionally left out for now, but the wiring is ready:
 
 Two tables, created automatically on first use:
 
+**users** — `id`, `username`, `name`, `password_hash`, `role`, `created_at`
 **clients** — `id`, `name`, `email`, `created_at`
 **tasks** — `id`, `client_id`, `title`, `priority`, `due_date`, `done`,
-`created_at`, `completed_at`
+`created_at`, `completed_at`, `assignee_id`, `timer_started_at`,
+`time_spent_seconds`
 **suggestions** — `id`, `client_id`, `title`, `priority`, `due_date`,
 `source_subject`, `source_from`, `created_at` (pending email-extracted tasks)
 
-Deleting a client cascades to delete its tasks and suggestions.
+Deleting a client cascades to delete its tasks and suggestions. Passwords are
+stored only as salted scrypt hashes.
 
 ---
 

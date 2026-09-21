@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "crypto";
-import { Client, Task, Suggestion, Priority, PRIORITIES } from "./types";
+import { Client, Task, Suggestion, User, Role, Priority, PRIORITIES } from "./types";
+import { hashPassword, verifyPassword, sessionUserId } from "./auth";
 
 /**
  * The Vercel/Neon integration injects the connection string under one of a few
@@ -78,6 +79,22 @@ function ensureSchema(): Promise<void> {
           source_from    TEXT NOT NULL DEFAULT '',
           created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
+
+      // Users (admins + employees) and task assignment / timers.
+      await sql`
+        CREATE TABLE IF NOT EXISTS users (
+          id            TEXT PRIMARY KEY,
+          username      TEXT NOT NULL UNIQUE,
+          name          TEXT NOT NULL DEFAULT '',
+          password_hash TEXT NOT NULL,
+          role          TEXT NOT NULL DEFAULT 'employee',
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
+      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_id TEXT`;
+      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS timer_started_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS time_spent_seconds INTEGER NOT NULL DEFAULT 0`;
+
+      await seedAdmin(sql);
     })().catch((err) => {
       // Reset so a later request can retry after a transient failure.
       schemaReady = null;
@@ -96,6 +113,96 @@ function iso(value: unknown): string {
   if (!value) return "";
   const d = value instanceof Date ? value : new Date(String(value));
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+// ── Users (admins + employees) ───────────────────────────────
+
+function normalizeRole(value: string): Role {
+  return value === "admin" ? "admin" : "employee";
+}
+
+function rowToUser(r: Row): User {
+  return {
+    id: String(r.id),
+    username: String(r.username),
+    name: String(r.name ?? ""),
+    role: normalizeRole(String(r.role)),
+    createdAt: iso(r.created_at),
+  };
+}
+
+/** Create the first admin from env if no admin exists yet (no lockout). */
+async function seedAdmin(sql: SqlTag): Promise<void> {
+  const existing = await sql`SELECT id FROM users WHERE role = 'admin' LIMIT 1`;
+  if (existing.length > 0) return;
+  const username = (process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || process.env.APP_PASSWORD;
+  if (!password) return; // nothing to seed with — set ADMIN_PASSWORD or APP_PASSWORD
+  await sql`
+    INSERT INTO users (id, username, name, password_hash, role)
+    VALUES (${randomUUID()}, ${username}, ${"Admin"}, ${hashPassword(password)}, ${"admin"})
+    ON CONFLICT (username) DO NOTHING`;
+}
+
+export async function getUserByUsername(username: string): Promise<User | null> {
+  await ensureSchema();
+  const rows = await db()`SELECT * FROM users WHERE username = ${username.trim().toLowerCase()}`;
+  return rows[0] ? rowToUser(rows[0]) : null;
+}
+
+export async function getUserById(id: string): Promise<User | null> {
+  await ensureSchema();
+  const rows = await db()`SELECT * FROM users WHERE id = ${id}`;
+  return rows[0] ? rowToUser(rows[0]) : null;
+}
+
+/** The signed-in user, resolved from the session cookie. */
+export async function getCurrentUser(): Promise<User | null> {
+  const id = sessionUserId();
+  if (!id) return null;
+  return getUserById(id);
+}
+
+/** Verify a login. Returns the user on success, null otherwise. */
+export async function verifyLogin(username: string, password: string): Promise<User | null> {
+  await ensureSchema();
+  const rows = await db()`SELECT * FROM users WHERE username = ${username.trim().toLowerCase()}`;
+  const row = rows[0];
+  if (!row) return null;
+  if (!verifyPassword(password, String(row.password_hash))) return null;
+  return rowToUser(row);
+}
+
+export async function listUsers(): Promise<User[]> {
+  await ensureSchema();
+  const rows = await db()`SELECT id, username, name, role, created_at FROM users ORDER BY role ASC, username ASC`;
+  return rows.map(rowToUser);
+}
+
+export async function createUser(input: {
+  username: string;
+  name: string;
+  password: string;
+  role: Role;
+}): Promise<User> {
+  await ensureSchema();
+  const username = input.username.trim().toLowerCase();
+  if (!username) throw new Error("Username is required");
+  if (!input.password) throw new Error("Password is required");
+  const existing = await db()`SELECT id FROM users WHERE username = ${username}`;
+  if (existing.length > 0) throw new Error("That username is already taken");
+  const rows = await db()`
+    INSERT INTO users (id, username, name, password_hash, role)
+    VALUES (${randomUUID()}, ${username}, ${input.name.trim()}, ${hashPassword(input.password)}, ${input.role})
+    RETURNING id, username, name, role, created_at`;
+  return rowToUser(rows[0]);
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await ensureSchema();
+  // Unassign their tasks first (assignee_id has no FK cascade).
+  await db()`UPDATE tasks SET assignee_id = NULL WHERE assignee_id = ${id}`;
+  await db()`DELETE FROM users WHERE id = ${id}`;
 }
 
 // ── Clients ──────────────────────────────────────────────────
@@ -132,12 +239,30 @@ export async function deleteClient(id: string): Promise<void> {
 
 // ── Tasks ────────────────────────────────────────────────────
 
-export async function listTasks(): Promise<Task[]> {
+/** List tasks; pass an assigneeId to scope to one person (employees). */
+export async function listTasks(opts?: { assigneeId?: string }): Promise<Task[]> {
+  await ensureSchema();
+  const sql = db();
+  const rows = opts?.assigneeId
+    ? await sql`
+        SELECT t.*, u.name AS assignee_name, u.username AS assignee_username
+        FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
+        WHERE t.assignee_id = ${opts.assigneeId}
+        ORDER BY t.created_at DESC`
+    : await sql`
+        SELECT t.*, u.name AS assignee_name, u.username AS assignee_username
+        FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
+        ORDER BY t.created_at DESC`;
+  return rows.map(rowToTask);
+}
+
+export async function getTask(id: string): Promise<Task | null> {
   await ensureSchema();
   const rows = await db()`
-    SELECT id, client_id, title, priority, due_date, done, created_at, completed_at
-    FROM tasks ORDER BY created_at DESC`;
-  return rows.map(rowToTask);
+    SELECT t.*, u.name AS assignee_name, u.username AS assignee_username
+    FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
+    WHERE t.id = ${id}`;
+  return rows[0] ? rowToTask(rows[0]) : null;
 }
 
 export async function addTask(input: {
@@ -145,19 +270,20 @@ export async function addTask(input: {
   title: string;
   priority: Priority;
   dueDate: string;
+  assigneeId?: string;
 }): Promise<Task> {
   await ensureSchema();
   const id = randomUUID();
-  const rows = await db()`
-    INSERT INTO tasks (id, client_id, title, priority, due_date, done)
-    VALUES (${id}, ${input.clientId}, ${input.title.trim()}, ${input.priority}, ${input.dueDate || ""}, false)
-    RETURNING id, client_id, title, priority, due_date, done, created_at, completed_at`;
-  return rowToTask(rows[0]);
+  await db()`
+    INSERT INTO tasks (id, client_id, title, priority, due_date, done, assignee_id)
+    VALUES (${id}, ${input.clientId}, ${input.title.trim()}, ${input.priority},
+            ${input.dueDate || ""}, false, ${input.assigneeId || null})`;
+  return (await getTask(id))!;
 }
 
 export async function updateTask(
   id: string,
-  patch: Partial<Pick<Task, "title" | "priority" | "dueDate" | "done">>
+  patch: Partial<Pick<Task, "title" | "priority" | "dueDate" | "done" | "assigneeId">>
 ): Promise<Task | null> {
   await ensureSchema();
   const sql = db();
@@ -171,15 +297,47 @@ export async function updateTask(
   if (patch.dueDate !== undefined) {
     await sql`UPDATE tasks SET due_date = ${patch.dueDate} WHERE id = ${id}`;
   }
+  if (patch.assigneeId !== undefined) {
+    await sql`UPDATE tasks SET assignee_id = ${patch.assigneeId || null} WHERE id = ${id}`;
+  }
   if (patch.done !== undefined) {
-    const completedAt = patch.done ? new Date().toISOString() : null;
-    await sql`UPDATE tasks SET done = ${patch.done}, completed_at = ${completedAt} WHERE id = ${id}`;
+    if (patch.done) {
+      // Completing auto-stops a running timer and banks the elapsed time.
+      await sql`
+        UPDATE tasks SET
+          done = true,
+          completed_at = now(),
+          time_spent_seconds = time_spent_seconds
+            + COALESCE(FLOOR(EXTRACT(EPOCH FROM (now() - timer_started_at)))::int, 0),
+          timer_started_at = NULL
+        WHERE id = ${id}`;
+    } else {
+      await sql`UPDATE tasks SET done = false, completed_at = NULL WHERE id = ${id}`;
+    }
   }
 
-  const rows = await sql`
-    SELECT id, client_id, title, priority, due_date, done, created_at, completed_at
-    FROM tasks WHERE id = ${id}`;
-  return rows[0] ? rowToTask(rows[0]) : null;
+  return getTask(id);
+}
+
+/** Start the timer (only if the task is open and not already running). */
+export async function startTimer(id: string): Promise<Task | null> {
+  await ensureSchema();
+  await db()`
+    UPDATE tasks SET timer_started_at = now()
+    WHERE id = ${id} AND done = false AND timer_started_at IS NULL`;
+  return getTask(id);
+}
+
+/** Pause the timer: bank the elapsed interval and stop the clock. */
+export async function pauseTimer(id: string): Promise<Task | null> {
+  await ensureSchema();
+  await db()`
+    UPDATE tasks SET
+      time_spent_seconds = time_spent_seconds
+        + COALESCE(FLOOR(EXTRACT(EPOCH FROM (now() - timer_started_at)))::int, 0),
+      timer_started_at = NULL
+    WHERE id = ${id} AND timer_started_at IS NOT NULL`;
+  return getTask(id);
 }
 
 export async function deleteTask(id: string): Promise<void> {
@@ -197,6 +355,10 @@ function rowToTask(r: Record<string, unknown>): Task {
     done: r.done === true,
     createdAt: iso(r.created_at),
     completedAt: iso(r.completed_at),
+    assigneeId: r.assignee_id ? String(r.assignee_id) : "",
+    assigneeName: String(r.assignee_name || r.assignee_username || ""),
+    timerStartedAt: iso(r.timer_started_at),
+    timeSpentSeconds: Number(r.time_spent_seconds ?? 0),
   };
 }
 

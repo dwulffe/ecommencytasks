@@ -18,11 +18,17 @@ async function hmacHex(secret: string, message: string): Promise<string> {
     .join("");
 }
 
+// The cookie is "<userId>.<hmac(userId)>" — verify the signature (not the
+// user's existence; the API routes resolve and re-check that per request).
 async function isValidSession(token: string | undefined): Promise<boolean> {
   const secret = process.env.AUTH_SECRET;
   if (!token || !secret) return false;
-  const expected = await hmacHex(secret, "ecommency-authenticated");
-  return token === expected;
+  const i = token.lastIndexOf(".");
+  if (i <= 0) return false;
+  const id = token.slice(0, i);
+  const sig = token.slice(i + 1);
+  const expected = await hmacHex(secret, id);
+  return sig === expected;
 }
 
 export async function middleware(req: NextRequest) {

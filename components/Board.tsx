@@ -3,41 +3,59 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
-import { Client, Task, Suggestion, Priority, PRIORITIES } from "@/lib/types";
+import { Client, Task, Suggestion, User, Priority, Role, PRIORITIES } from "@/lib/types";
 
-type Filter = "all" | "active" | "done";
+type Filter = "open" | "overdue" | "completed" | "all";
 type Sort = "priority" | "due" | "added";
 
 const PRIORITY_RANK: Record<Priority, number> = { High: 0, Medium: 1, Low: 2 };
 
+interface Me {
+  id: string;
+  name: string;
+  username: string;
+  role: Role;
+}
+
 export function Board() {
   const router = useRouter();
+  const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [selected, setSelected] = useState<string | "all">("all");
-  const [filter, setFilter] = useState<Filter>("active");
+  const [filter, setFilter] = useState<Filter>("open");
   const [sort, setSort] = useState<Sort>("priority");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+
+  const isAdmin = me?.role === "admin";
 
   function flashError(msg: string) {
     setError(msg);
     setTimeout(() => setError(""), 3500);
   }
 
-  async function refresh() {
+  async function refresh(role: Role) {
     try {
-      const [c, t, s] = await Promise.all([
-        fetch("/api/clients").then((r) => r.json()),
-        fetch("/api/tasks").then((r) => r.json()),
-        fetch("/api/suggestions").then((r) => r.json()),
-      ]);
+      const requests: Promise<Response>[] = [
+        fetch("/api/clients"),
+        fetch("/api/tasks"),
+      ];
+      if (role === "admin") {
+        requests.push(fetch("/api/suggestions"), fetch("/api/users"));
+      }
+      const [cRes, tRes, sRes, uRes] = await Promise.all(requests);
+      const c = await cRes.json();
+      const t = await tRes.json();
       if (c.error) throw new Error(c.error);
       if (t.error) throw new Error(t.error);
       setClients(c.clients || []);
       setTasks(t.tasks || []);
-      setSuggestions(s.suggestions || []);
+      if (sRes) setSuggestions((await sRes.json()).suggestions || []);
+      if (uRes) setUsers((await uRes.json()).users || []);
     } catch (err) {
       flashError(err instanceof Error ? err.message : "Failed to load data");
     } finally {
@@ -46,42 +64,61 @@ export function Board() {
   }
 
   useEffect(() => {
-    refresh();
+    (async () => {
+      const res = await fetch("/api/auth/me");
+      if (!res.ok) {
+        router.push("/login");
+        return;
+      }
+      const data = await res.json();
+      setMe(data.user);
+      await refresh(data.user.role);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Tick every second while any timer is running, so elapsed time updates live.
+  useEffect(() => {
+    if (!tasks.some((t) => t.timerStartedAt)) return;
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [tasks]);
+
+  const employees = useMemo(() => users, [users]);
+  const userName = useMemo(() => {
+    const map = new Map(users.map((u) => [u.id, u.name || u.username]));
+    return (id: string) => map.get(id) || "";
+  }, [users]);
+
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const t of tasks) {
-      if (!t.done) map[t.clientId] = (map[t.clientId] || 0) + 1;
-    }
+    for (const t of tasks) if (!t.done) map[t.clientId] = (map[t.clientId] || 0) + 1;
     return map;
   }, [tasks]);
 
+  const today = new Date().toISOString().slice(0, 10);
+
   const visibleTasks = useMemo(() => {
-    let list = tasks.filter((t) => selected === "all" || t.clientId === selected);
-    if (filter === "active") list = list.filter((t) => !t.done);
-    if (filter === "done") list = list.filter((t) => t.done);
+    let list = tasks.filter((t) => !isAdmin || selected === "all" || t.clientId === selected);
+    if (filter === "open") list = list.filter((t) => !t.done);
+    else if (filter === "completed") list = list.filter((t) => t.done);
+    else if (filter === "overdue")
+      list = list.filter((t) => !t.done && t.dueDate && t.dueDate < today);
 
     const sorted = [...list].sort((a, b) => {
       if (sort === "priority") {
-        if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority]) {
+        if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority])
           return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-        }
         return dueSortValue(a.dueDate) - dueSortValue(b.dueDate);
       }
       if (sort === "due") return dueSortValue(a.dueDate) - dueSortValue(b.dueDate);
-      return (a.createdAt < b.createdAt ? 1 : -1); // newest first
+      return a.createdAt < b.createdAt ? 1 : -1;
     });
-    // Completed tasks always sink to the bottom in the "all" filter.
     return sorted.sort((a, b) => Number(a.done) - Number(b.done));
-  }, [tasks, selected, filter, sort]);
+  }, [tasks, selected, filter, sort, isAdmin, today]);
 
   const selectedClient = clients.find((c) => c.id === selected);
-  const clientName = useMemo(
-    () => new Map(clients.map((c) => [c.id, c.name])),
-    [clients]
-  );
+  const clientName = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
 
   const visibleSuggestions = useMemo(
     () => suggestions.filter((s) => selected === "all" || s.clientId === selected),
@@ -101,27 +138,6 @@ export function Board() {
     setSelected(data.client.id);
   }
 
-  async function acceptSuggestion(id: string) {
-    setSuggestions((prev) => prev.filter((s) => s.id !== id));
-    const res = await fetch(`/api/suggestions/${id}`, { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) {
-      flashError(data.error || "Could not accept suggestion");
-      refresh();
-      return;
-    }
-    setTasks((prev) => [data.task, ...prev]);
-  }
-
-  async function dismissSuggestion(id: string) {
-    setSuggestions((prev) => prev.filter((s) => s.id !== id));
-    const res = await fetch(`/api/suggestions/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      flashError("Could not dismiss suggestion");
-      refresh();
-    }
-  }
-
   async function removeClient(id: string) {
     if (!confirm("Delete this client and all of its tasks?")) return;
     setClients((prev) => prev.filter((c) => c.id !== id));
@@ -130,11 +146,16 @@ export function Board() {
     const res = await fetch(`/api/clients?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!res.ok) {
       flashError("Could not delete client");
-      refresh();
+      refresh("admin");
     }
   }
 
-  async function addTask(input: { title: string; priority: Priority; dueDate: string }) {
+  async function addTask(input: {
+    title: string;
+    priority: Priority;
+    dueDate: string;
+    assigneeId: string;
+  }) {
     const clientId = selected === "all" ? clients[0]?.id : selected;
     if (!clientId) return flashError("Add a client first");
     const res = await fetch("/api/tasks", {
@@ -147,18 +168,35 @@ export function Board() {
     setTasks((prev) => [data.task, ...prev]);
   }
 
+  function replaceTask(t: Task) {
+    setTasks((prev) => prev.map((x) => (x.id === t.id ? t : x)));
+  }
+
   async function patchTask(id: string, patch: Partial<Task>) {
-    // optimistic
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     const res = await fetch(`/api/tasks/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      flashError("Could not save change");
-      refresh();
+      flashError(data.error || "Could not save change");
+      me && refresh(me.role);
+    } else if (data.task) {
+      replaceTask(data.task);
     }
+  }
+
+  async function timerAction(id: string, action: "start" | "pause") {
+    const res = await fetch(`/api/tasks/${id}/timer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return flashError(data.error || "Timer failed");
+    if (data.task) replaceTask(data.task);
   }
 
   async function removeTask(id: string) {
@@ -166,7 +204,45 @@ export function Board() {
     const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
     if (!res.ok) {
       flashError("Could not delete task");
-      refresh();
+      me && refresh(me.role);
+    }
+  }
+
+  async function acceptSuggestion(id: string) {
+    setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    const res = await fetch(`/api/suggestions/${id}`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) return flashError(data.error || "Could not accept suggestion");
+    setTasks((prev) => [data.task, ...prev]);
+  }
+
+  async function dismissSuggestion(id: string) {
+    setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    const res = await fetch(`/api/suggestions/${id}`, { method: "DELETE" });
+    if (!res.ok) flashError("Could not dismiss suggestion");
+  }
+
+  async function addEmployee(input: { username: string; name: string; password: string }) {
+    const res = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = await res.json();
+    if (!res.ok) return flashError(data.error || "Could not add employee");
+    setUsers((prev) => [...prev, data.user]);
+  }
+
+  async function removeUser(id: string) {
+    if (!confirm("Remove this person? Their tasks will become unassigned.")) return;
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+    setTasks((prev) =>
+      prev.map((t) => (t.assigneeId === id ? { ...t, assigneeId: "", assigneeName: "" } : t))
+    );
+    const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      flashError("Could not remove person");
+      me && refresh(me.role);
     }
   }
 
@@ -177,6 +253,7 @@ export function Board() {
   }
 
   const activeCount = visibleTasks.filter((t) => !t.done).length;
+  const heading = isAdmin ? (selected === "all" ? "All clients" : selectedClient?.name || "Tasks") : "My tasks";
 
   return (
     <div className="app">
@@ -187,73 +264,79 @@ export function Board() {
           <span className="divider" />
           <span className="app-name">Client Tasks</span>
         </div>
-        <button className="btn ghost" onClick={logout}>
-          Log out
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {me && (
+            <span className="whoami">
+              {me.name || me.username}
+              <span className={`role-tag ${me.role}`}>{me.role}</span>
+            </span>
+          )}
+          <button className="btn ghost" onClick={logout}>
+            Log out
+          </button>
+        </div>
       </header>
 
-      <div className="layout">
-        <aside className="sidebar">
-          <h2>Clients</h2>
-          <div
-            className={`client-item ${selected === "all" ? "active" : ""}`}
-            onClick={() => setSelected("all")}
-          >
-            <span className="name">All clients</span>
-            <span className="count">{tasks.filter((t) => !t.done).length}</span>
-          </div>
-
-          {clients.map((c) => (
+      <div className={`layout ${isAdmin ? "" : "solo"}`}>
+        {isAdmin && (
+          <aside className="sidebar">
+            <h2>Clients</h2>
             <div
-              key={c.id}
-              className={`client-item ${selected === c.id ? "active" : ""}`}
-              onClick={() => setSelected(c.id)}
+              className={`client-item ${selected === "all" ? "active" : ""}`}
+              onClick={() => setSelected("all")}
             >
-              <span className="name">
-                <span className="dot" />
-                {c.name}
-              </span>
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span className="count">{counts[c.id] || 0}</span>
-                <button
-                  className="kill"
-                  title="Delete client"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeClient(c.id);
-                  }}
-                >
-                  ×
-                </button>
-              </span>
+              <span className="name">All clients</span>
+              <span className="count">{tasks.filter((t) => !t.done).length}</span>
             </div>
-          ))}
+            {clients.map((c) => (
+              <div
+                key={c.id}
+                className={`client-item ${selected === c.id ? "active" : ""}`}
+                onClick={() => setSelected(c.id)}
+              >
+                <span className="name">
+                  <span className="dot" />
+                  {c.name}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="count">{counts[c.id] || 0}</span>
+                  <button
+                    className="kill"
+                    title="Delete client"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeClient(c.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              </div>
+            ))}
+            <AddClient onAdd={addClient} />
 
-          <AddClient onAdd={addClient} />
-        </aside>
+            <Team users={users} meId={me?.id || ""} onAdd={addEmployee} onRemove={removeUser} />
+          </aside>
+        )}
 
         <main className="main">
           <div className="main-head">
             <div>
-              <h1>{selected === "all" ? "All clients" : selectedClient?.name || "Tasks"}</h1>
+              <h1>{heading}</h1>
               <div className="sub">
                 {loading
                   ? "Loading…"
                   : `${activeCount} open ${activeCount === 1 ? "task" : "tasks"}${
-                      selected === "all" ? ` across ${clients.length} clients` : ""
+                      isAdmin && selected === "all" ? ` across ${clients.length} clients` : ""
                     }`}
               </div>
             </div>
 
             <div className="toolbar">
               <div className="segmented">
-                {(["active", "all", "done"] as Filter[]).map((f) => (
-                  <button
-                    key={f}
-                    className={filter === f ? "on" : ""}
-                    onClick={() => setFilter(f)}
-                  >
-                    {f === "active" ? "Open" : f === "done" ? "Done" : "All"}
+                {(["open", "overdue", "completed", "all"] as Filter[]).map((f) => (
+                  <button key={f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>
+                    {f === "open" ? "Open" : f === "overdue" ? "Overdue" : f === "completed" ? "Completed" : "All"}
                   </button>
                 ))}
               </div>
@@ -265,15 +348,11 @@ export function Board() {
             </div>
           </div>
 
-          {clients.length > 0 && (
-            <AddTask
-              key={selected}
-              disabled={selected === "all" && clients.length === 0}
-              onAdd={addTask}
-            />
+          {isAdmin && clients.length > 0 && (
+            <AddTask key={selected} employees={employees} onAdd={addTask} />
           )}
 
-          {visibleSuggestions.length > 0 && (
+          {isAdmin && visibleSuggestions.length > 0 && (
             <div className="suggest-block">
               <div className="suggest-head">
                 <span className="spark">✦</span>
@@ -295,20 +374,24 @@ export function Board() {
 
           <div className="task-list" style={{ marginTop: 14 }}>
             {loading ? null : visibleTasks.length === 0 ? (
-              <EmptyState hasClients={clients.length > 0} filter={filter} />
+              <EmptyState isAdmin={isAdmin} hasClients={clients.length > 0} filter={filter} />
             ) : (
               visibleTasks.map((t) => (
                 <TaskRow
                   key={t.id}
                   task={t}
-                  showClient={selected === "all"}
+                  now={now}
+                  isAdmin={!!isAdmin}
+                  showClient={!isAdmin || selected === "all"}
                   clientName={clientName.get(t.clientId) || ""}
+                  employees={employees}
+                  assigneeName={t.assigneeName || userName(t.assigneeId)}
                   onToggle={() => patchTask(t.id, { done: !t.done })}
-                  onCyclePriority={() =>
-                    patchTask(t.id, { priority: nextPriority(t.priority) })
-                  }
+                  onCyclePriority={() => patchTask(t.id, { priority: nextPriority(t.priority) })}
                   onDue={(d) => patchTask(t.id, { dueDate: d })}
                   onRename={(title) => title.trim() && patchTask(t.id, { title })}
+                  onAssign={(assigneeId) => patchTask(t.id, { assigneeId })}
+                  onTimer={(action) => timerAction(t.id, action)}
                   onDelete={() => removeTask(t.id)}
                 />
               ))
@@ -324,7 +407,6 @@ export function Board() {
 
 // ── Sub-components ─────────────────────────────────────────
 
-/** A textarea that soft-wraps and grows its height to fit its content. */
 function AutoTextarea({
   value,
   ...rest
@@ -355,12 +437,7 @@ function AddClient({ onAdd }: { onAdd: (name: string, email: string) => void }) 
         }
       }}
     >
-      <input
-        type="text"
-        placeholder="Add client…"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
+      <input type="text" placeholder="Add client…" value={name} onChange={(e) => setName(e.target.value)} />
       <input
         type="text"
         placeholder="Client email or domain (optional)"
@@ -371,6 +448,316 @@ function AddClient({ onAdd }: { onAdd: (name: string, email: string) => void }) 
         Add client
       </button>
     </form>
+  );
+}
+
+function Team({
+  users,
+  meId,
+  onAdd,
+  onRemove,
+}: {
+  users: User[];
+  meId: string;
+  onAdd: (input: { username: string; name: string; password: string }) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+
+  return (
+    <div className="team">
+      <h2 style={{ marginTop: 20 }}>Team</h2>
+      {users.map((u) => (
+        <div key={u.id} className="team-item">
+          <span className="name">
+            {u.name || u.username}
+            <span className={`role-tag ${u.role}`}>{u.role}</span>
+          </span>
+          {u.id !== meId && (
+            <button className="kill" title="Remove" onClick={() => onRemove(u.id)}>
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+
+      {open ? (
+        <form
+          className="add-client-col"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (username.trim() && password) {
+              onAdd({ username: username.trim(), name: name.trim(), password });
+              setUsername("");
+              setName("");
+              setPassword("");
+              setOpen(false);
+            }
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Username (e.g. maria)"
+            value={username}
+            autoCapitalize="none"
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <input type="text" placeholder="Full name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            type="text"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn" type="submit" disabled={!username.trim() || !password}>
+              Create
+            </button>
+            <button type="button" className="btn ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setOpen(true)}>
+          + Add employee
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddTask({
+  onAdd,
+  employees,
+}: {
+  onAdd: (input: { title: string; priority: Priority; dueDate: string; assigneeId: string }) => void;
+  employees: User[];
+}) {
+  const [title, setTitle] = useState("");
+  const [priority, setPriority] = useState<Priority>("Medium");
+  const [dueDate, setDueDate] = useState("");
+  const [assigneeId, setAssigneeId] = useState("");
+
+  return (
+    <form
+      className="add-task"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        onAdd({ title: title.trim(), priority, dueDate, assigneeId });
+        setTitle("");
+        setPriority("Medium");
+        setDueDate("");
+        setAssigneeId("");
+      }}
+    >
+      <AutoTextarea
+        className="title grow"
+        placeholder="Add a task…"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
+          }
+        }}
+      />
+      <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} title="Assign to">
+        <option value="">Unassigned</option>
+        {employees.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name || u.username}
+          </option>
+        ))}
+      </select>
+      <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>
+        {PRIORITIES.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+      <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+      <button className="btn" type="submit" disabled={!title.trim()}>
+        Add task
+      </button>
+    </form>
+  );
+}
+
+function TaskRow({
+  task,
+  now,
+  isAdmin,
+  showClient,
+  clientName,
+  employees,
+  assigneeName,
+  onToggle,
+  onCyclePriority,
+  onDue,
+  onRename,
+  onAssign,
+  onTimer,
+  onDelete,
+}: {
+  task: Task;
+  now: number;
+  isAdmin: boolean;
+  showClient: boolean;
+  clientName: string;
+  employees: User[];
+  assigneeName: string;
+  onToggle: () => void;
+  onCyclePriority: () => void;
+  onDue: (d: string) => void;
+  onRename: (title: string) => void;
+  onAssign: (assigneeId: string) => void;
+  onTimer: (action: "start" | "pause") => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.title);
+  const dateRef = useRef<HTMLInputElement>(null);
+
+  const due = describeDue(task.dueDate);
+  const running = !!task.timerStartedAt;
+  const seconds = elapsedSeconds(task, now);
+
+  function openDatePicker() {
+    const el = dateRef.current;
+    if (!el) return;
+    try {
+      el.showPicker();
+    } catch {
+      el.focus();
+    }
+  }
+
+  return (
+    <div className={`task-row ${task.done ? "done" : ""}`}>
+      <button
+        className={`checkbox ${task.done ? "checked" : ""}`}
+        onClick={onToggle}
+        aria-label={task.done ? "Mark as not done" : "Mark as done"}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2.5 6.2l2.3 2.3 4.7-5" stroke="#06120b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      <div className="task-main">
+        {isAdmin && editing ? (
+          <AutoTextarea
+            className="grow"
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              setEditing(false);
+              if (draft.trim() && draft !== task.title) onRename(draft.trim());
+              else setDraft(task.title);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === "Escape") {
+                setDraft(task.title);
+                setEditing(false);
+              }
+            }}
+            style={{ width: "100%" }}
+          />
+        ) : (
+          <div
+            className="task-title"
+            onClick={() => isAdmin && setEditing(true)}
+            title={isAdmin ? "Click to rename" : undefined}
+          >
+            {task.title}
+          </div>
+        )}
+
+        <div className="task-subline">
+          {showClient && clientName && <span>{clientName}</span>}
+          {isAdmin ? (
+            <select
+              className="assignee-select"
+              value={task.assigneeId}
+              onChange={(e) => onAssign(e.target.value)}
+              title="Assign to"
+            >
+              <option value="">Unassigned</option>
+              {employees.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name || u.username}
+                </option>
+              ))}
+            </select>
+          ) : (
+            assigneeName && <span className="assignee-chip">{assigneeName}</span>
+          )}
+        </div>
+
+        {task.done && task.completedAt && (
+          <div className="completed-at">
+            ✓ Completed {formatCompleted(task.completedAt)}
+            {task.timeSpentSeconds > 0 && <> · {formatDuration(task.timeSpentSeconds)} logged</>}
+          </div>
+        )}
+      </div>
+
+      <div className="task-meta">
+        {!task.done && (
+          <div className="timer">
+            <button
+              className={`timer-btn ${running ? "running" : ""}`}
+              onClick={() => onTimer(running ? "pause" : "start")}
+              title={running ? "Pause timer" : "Start timer"}
+            >
+              {running ? "⏸ Pause" : "▶ Start"}
+            </button>
+            {(running || seconds > 0) && (
+              <span className={`timer-time ${running ? "live" : ""}`}>{formatDuration(seconds)}</span>
+            )}
+          </div>
+        )}
+
+        {isAdmin ? (
+          <button className={`badge ${task.priority.toLowerCase()}`} onClick={onCyclePriority} title="Click to change priority" style={{ border: "none", cursor: "pointer" }}>
+            <span className="pdot" />
+            {task.priority}
+          </button>
+        ) : (
+          <span className={`badge ${task.priority.toLowerCase()}`}>
+            <span className="pdot" />
+            {task.priority}
+          </span>
+        )}
+
+        {isAdmin ? (
+          <button type="button" className={`due due-btn ${due.cls}`} title="Set due date" onClick={openDatePicker}>
+            {due.label}
+            <input ref={dateRef} type="date" value={task.dueDate} onChange={(e) => onDue(e.target.value)} className="due-input" tabIndex={-1} aria-hidden="true" />
+          </button>
+        ) : (
+          task.dueDate && <span className={`due ${due.cls}`}>{due.label}</span>
+        )}
+
+        {isAdmin && (
+          <button className="kill" title="Delete task" onClick={onDelete}>
+            ×
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -414,207 +801,8 @@ function SuggestionCard({
   );
 }
 
-function AddTask({
-  onAdd,
-  disabled,
-}: {
-  onAdd: (input: { title: string; priority: Priority; dueDate: string }) => void;
-  disabled?: boolean;
-}) {
-  const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState<Priority>("Medium");
-  const [dueDate, setDueDate] = useState("");
-
-  return (
-    <form
-      className="add-task"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!title.trim()) return;
-        onAdd({ title: title.trim(), priority, dueDate });
-        setTitle("");
-        setPriority("Medium");
-        setDueDate("");
-      }}
-    >
-      <AutoTextarea
-        className="title grow"
-        placeholder="Add a task…"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        disabled={disabled}
-        onKeyDown={(e) => {
-          // Enter submits; Shift+Enter adds a line break.
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            e.currentTarget.form?.requestSubmit();
-          }
-        }}
-      />
-      <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>
-        {PRIORITIES.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </select>
-      <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-      <button className="btn" type="submit" disabled={!title.trim() || disabled}>
-        Add task
-      </button>
-    </form>
-  );
-}
-
-function TaskRow({
-  task,
-  showClient,
-  clientName,
-  onToggle,
-  onCyclePriority,
-  onDue,
-  onRename,
-  onDelete,
-}: {
-  task: Task;
-  showClient: boolean;
-  clientName: string;
-  onToggle: () => void;
-  onCyclePriority: () => void;
-  onDue: (d: string) => void;
-  onRename: (title: string) => void;
-  onDelete: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(task.title);
-  const dateRef = useRef<HTMLInputElement>(null);
-
-  const due = describeDue(task.dueDate);
-
-  function openDatePicker() {
-    const el = dateRef.current;
-    if (!el) return;
-    // showPicker() is the reliable cross-browser way to open the native
-    // calendar on demand; fall back to focus() where it isn't supported.
-    try {
-      el.showPicker();
-    } catch {
-      el.focus();
-    }
-  }
-
-  return (
-    <div className={`task-row ${task.done ? "done" : ""}`}>
-      <button
-        className={`checkbox ${task.done ? "checked" : ""}`}
-        onClick={onToggle}
-        aria-label={task.done ? "Mark as not done" : "Mark as done"}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path
-            d="M2.5 6.2l2.3 2.3 4.7-5"
-            stroke="#06120b"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-
-      <div className="task-main">
-        {editing ? (
-          <AutoTextarea
-            className="grow"
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => {
-              setEditing(false);
-              if (draft.trim() && draft !== task.title) onRename(draft.trim());
-              else setDraft(task.title);
-            }}
-            onKeyDown={(e) => {
-              // Enter saves; Shift+Enter adds a line break; Escape cancels.
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-              if (e.key === "Escape") {
-                setDraft(task.title);
-                setEditing(false);
-              }
-            }}
-            style={{ width: "100%" }}
-          />
-        ) : (
-          <div
-            className="task-title"
-            onClick={() => setEditing(true)}
-            title="Click to rename"
-          >
-            {task.title}
-          </div>
-        )}
-        {showClient && (
-          <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 2 }}>
-            {clientName}
-          </div>
-        )}
-        {task.done && task.completedAt && (
-          <div className="completed-at">✓ Completed {formatCompleted(task.completedAt)}</div>
-        )}
-      </div>
-
-      <div className="task-meta">
-        <button
-          className={`badge ${task.priority.toLowerCase()}`}
-          onClick={onCyclePriority}
-          title="Click to change priority"
-          style={{ border: "none", cursor: "pointer" }}
-        >
-          <span className="pdot" />
-          {task.priority}
-        </button>
-
-        <button
-          type="button"
-          className={`due due-btn ${due.cls}`}
-          title="Set due date"
-          onClick={openDatePicker}
-        >
-          {due.label}
-          <input
-            ref={dateRef}
-            type="date"
-            value={task.dueDate}
-            onChange={(e) => onDue(e.target.value)}
-            className="due-input"
-            tabIndex={-1}
-            aria-hidden="true"
-          />
-        </button>
-
-        {task.dueDate && (
-          <button
-            className="kill"
-            title="Clear due date"
-            onClick={() => onDue("")}
-            style={{ marginLeft: -6 }}
-          >
-            ⌫
-          </button>
-        )}
-
-        <button className="kill" title="Delete task" onClick={onDelete}>
-          ×
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ hasClients, filter }: { hasClients: boolean; filter: Filter }) {
-  if (!hasClients) {
+function EmptyState({ isAdmin, hasClients, filter }: { isAdmin: boolean; hasClients: boolean; filter: Filter }) {
+  if (isAdmin && !hasClients) {
     return (
       <div className="empty">
         <div className="pill">Get started</div>
@@ -628,12 +816,10 @@ function EmptyState({ hasClients, filter }: { hasClients: boolean; filter: Filte
   return (
     <div className="empty">
       <div className="big">
-        {filter === "done" ? "Nothing completed yet" : "No tasks here"}
+        {filter === "completed" ? "Nothing completed yet" : filter === "overdue" ? "Nothing overdue" : "No tasks here"}
       </div>
       <div>
-        {filter === "done"
-          ? "Completed tasks will show up here."
-          : "Add a task with the form above."}
+        {isAdmin ? "Add a task with the form above." : "Tasks assigned to you will show up here."}
       </div>
     </div>
   );
@@ -644,6 +830,25 @@ function EmptyState({ hasClients, filter }: { hasClients: boolean; filter: Filte
 function nextPriority(p: Priority): Priority {
   const order: Priority[] = ["High", "Medium", "Low"];
   return order[(order.indexOf(p) + 1) % order.length];
+}
+
+function elapsedSeconds(task: Task, now: number): number {
+  let s = task.timeSpentSeconds;
+  if (task.timerStartedAt) {
+    const started = Date.parse(task.timerStartedAt);
+    if (!Number.isNaN(started)) s += Math.max(0, Math.floor((now - started) / 1000));
+  }
+  return s;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${sec}s`;
 }
 
 function formatCompleted(iso: string): string {
@@ -659,7 +864,7 @@ function formatCompleted(iso: string): string {
 }
 
 function dueSortValue(dueDate: string): number {
-  if (!dueDate) return Number.MAX_SAFE_INTEGER; // no due date sorts last
+  if (!dueDate) return Number.MAX_SAFE_INTEGER;
   const t = new Date(dueDate + "T00:00:00").getTime();
   return Number.isNaN(t) ? Number.MAX_SAFE_INTEGER : t;
 }
@@ -672,7 +877,6 @@ function describeDue(dueDate: string): { label: string; cls: string } {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
-
   const label = due.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   if (diffDays < 0) return { label: `${label} · overdue`, cls: "overdue" };

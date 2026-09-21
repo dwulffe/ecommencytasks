@@ -6,6 +6,7 @@ import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,14 +19,14 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username, password }),
       });
       if (res.ok) {
         router.push("/");
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || "Incorrect password");
+        setError(data.error || "Incorrect username or password");
       }
     } catch {
       setError("Something went wrong");
@@ -42,18 +43,26 @@ export default function LoginPage() {
           <span className="wordmark">ECOMMENCY</span>
         </div>
         <h1>Client Tasks</h1>
-        <p>Enter the team password to continue.</p>
+        <p>Sign in with your username and password.</p>
         <form onSubmit={submit}>
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect="off"
+          />
           <input
             type="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            autoFocus
           />
           <div className="login-err">{error}</div>
-          <button className="btn" type="submit" disabled={loading || !password}>
-            {loading ? "Checking…" : "Enter"}
+          <button className="btn" type="submit" disabled={loading || !username || !password}>
+            {loading ? "Checking…" : "Sign in"}
           </button>
         </form>
       </div>
