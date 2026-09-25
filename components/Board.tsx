@@ -1031,7 +1031,7 @@ function TaskNotes({
   return (
     <div className="notes">
       <button className="notes-toggle" onClick={toggle}>
-        🗒 Notes{count > 0 ? ` (${count})` : ""}
+        Notes{count > 0 ? ` (${count})` : ""}
         <span className="chev">{open ? "▾" : "▸"}</span>
       </button>
 
