@@ -51,4 +51,14 @@ export interface Task {
   timerStartedAt: string;
   /** Total seconds logged against this task (excludes any currently-running interval). */
   timeSpentSeconds: number;
+  /** How many notes are attached (for the collapsed badge). */
+  noteCount: number;
+}
+
+export interface Note {
+  id: string;
+  taskId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
 }

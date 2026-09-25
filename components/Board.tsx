@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "./Logo";
-import { Client, Task, Suggestion, User, Priority, Role, PRIORITIES } from "@/lib/types";
+import { Client, Task, Suggestion, User, Note, Priority, Role, PRIORITIES } from "@/lib/types";
 
 type Filter = "open" | "overdue" | "completed" | "all";
 type Sort = "priority" | "due" | "added";
@@ -388,6 +388,7 @@ export function Board() {
                   task={t}
                   now={now}
                   isAdmin={!!isAdmin}
+                  meId={me?.id || ""}
                   showClient={!isAdmin || selected === "all"}
                   clientName={clientName.get(t.clientId) || ""}
                   employees={employees}
@@ -781,6 +782,7 @@ function TaskRow({
   task,
   now,
   isAdmin,
+  meId,
   showClient,
   clientName,
   employees,
@@ -796,6 +798,7 @@ function TaskRow({
   task: Task;
   now: number;
   isAdmin: boolean;
+  meId: string;
   showClient: boolean;
   clientName: string;
   employees: User[];
@@ -899,6 +902,8 @@ function TaskRow({
             {task.timeSpentSeconds > 0 && <> · {formatDuration(task.timeSpentSeconds)} logged</>}
           </div>
         )}
+
+        <TaskNotes taskId={task.id} initialCount={task.noteCount} meId={meId} isAdmin={isAdmin} />
       </div>
 
       <div className="task-meta">
@@ -944,6 +949,154 @@ function TaskRow({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function TaskNotes({
+  taskId,
+  initialCount,
+  meId,
+  isAdmin,
+}: {
+  taskId: string;
+  initialCount: number;
+  meId: string;
+  isAdmin: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [count, setCount] = useState(initialCount);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+
+  async function load() {
+    const res = await fetch(`/api/tasks/${taskId}/notes`);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setNotes(data.notes || []);
+      setCount((data.notes || []).length);
+      setLoaded(true);
+    }
+  }
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) load();
+  }
+
+  async function add() {
+    const body = draft.trim();
+    if (!body) return;
+    setBusy(true);
+    const res = await fetch(`/api/tasks/${taskId}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (res.ok) {
+      setNotes((p) => [...p, data.note]);
+      setCount((c) => c + 1);
+      setDraft("");
+    }
+  }
+
+  async function saveEdit(id: string) {
+    const body = editDraft.trim();
+    setEditingId(null);
+    if (!body) return;
+    const res = await fetch(`/api/notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.note) setNotes((p) => p.map((n) => (n.id === id ? data.note : n)));
+  }
+
+  async function remove(id: string) {
+    setNotes((p) => p.filter((n) => n.id !== id));
+    setCount((c) => Math.max(0, c - 1));
+    await fetch(`/api/notes/${id}`, { method: "DELETE" });
+  }
+
+  const canEdit = (n: Note) => isAdmin || n.authorId === meId;
+
+  return (
+    <div className="notes">
+      <button className="notes-toggle" onClick={toggle}>
+        🗒 Notes{count > 0 ? ` (${count})` : ""}
+        <span className="chev">{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div className="notes-panel">
+          {notes.map((n) => (
+            <div className="note" key={n.id}>
+              {editingId === n.id ? (
+                <AutoTextarea
+                  className="grow note-edit"
+                  value={editDraft}
+                  autoFocus
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onBlur={() => saveEdit(n.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                />
+              ) : (
+                <div className="note-body">
+                  <div className="note-text">{n.body}</div>
+                  <div className="note-foot">
+                    <span className="note-author">{n.authorName}</span>
+                    {canEdit(n) && (
+                      <span className="note-actions">
+                        <button
+                          onClick={() => {
+                            setEditingId(n.id);
+                            setEditDraft(n.body);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button onClick={() => remove(n.id)}>Delete</button>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div className="note-add">
+            <AutoTextarea
+              className="grow"
+              placeholder="Add a note…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  add();
+                }
+              }}
+            />
+            <button className="btn" onClick={add} disabled={!draft.trim() || busy}>
+              Add
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

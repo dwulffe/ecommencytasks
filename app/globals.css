@@ -535,6 +535,110 @@ a {
   letter-spacing: 0.01em;
 }
 
+/* ── Task notes ────────────────────────────────────────── */
+.notes {
+  margin-top: 8px;
+}
+
+.notes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.notes-toggle:hover {
+  color: var(--mint);
+}
+
+.notes-toggle .chev {
+  font-size: 10px;
+}
+
+.notes-panel {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 620px;
+}
+
+.note {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+}
+
+.note-text {
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.note-author {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.note-actions {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.note:hover .note-actions {
+  opacity: 1;
+}
+
+.note-actions button {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+
+.note-actions button:hover {
+  color: var(--mint);
+}
+
+.note-actions button:last-child:hover {
+  color: var(--danger);
+}
+
+.note-edit {
+  width: 100%;
+}
+
+.note-add {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.note-add .grow {
+  flex: 1;
+}
+
 .checkbox {
   width: 22px;
   height: 22px;

@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "crypto";
-import { Client, Task, Suggestion, User, Role, Priority, PRIORITIES } from "./types";
+import { Client, Task, Suggestion, User, Note, Role, Priority, PRIORITIES } from "./types";
 import { hashPassword, verifyPassword, sessionUserId } from "./auth";
 
 /**
@@ -93,6 +93,16 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_id TEXT`;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS timer_started_at TIMESTAMPTZ`;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS time_spent_seconds INTEGER NOT NULL DEFAULT 0`;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS notes (
+          id          TEXT PRIMARY KEY,
+          task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          author_id   TEXT NOT NULL DEFAULT '',
+          author_name TEXT NOT NULL DEFAULT '',
+          body        TEXT NOT NULL DEFAULT '',
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
 
       await ensureAdmin(sql);
     })().catch((err) => {
@@ -253,12 +263,14 @@ export async function listTasks(opts?: { assigneeId?: string }): Promise<Task[]>
   const sql = db();
   const rows = opts?.assigneeId
     ? await sql`
-        SELECT t.*, u.name AS assignee_name, u.username AS assignee_username
+        SELECT t.*, u.name AS assignee_name, u.username AS assignee_username,
+               (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count
         FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
         WHERE t.assignee_id = ${opts.assigneeId}
         ORDER BY t.created_at DESC`
     : await sql`
-        SELECT t.*, u.name AS assignee_name, u.username AS assignee_username
+        SELECT t.*, u.name AS assignee_name, u.username AS assignee_username,
+               (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count
         FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
         ORDER BY t.created_at DESC`;
   return rows.map(rowToTask);
@@ -267,7 +279,8 @@ export async function listTasks(opts?: { assigneeId?: string }): Promise<Task[]>
 export async function getTask(id: string): Promise<Task | null> {
   await ensureSchema();
   const rows = await db()`
-    SELECT t.*, u.name AS assignee_name, u.username AS assignee_username
+    SELECT t.*, u.name AS assignee_name, u.username AS assignee_username,
+           (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count
     FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
     WHERE t.id = ${id}`;
   return rows[0] ? rowToTask(rows[0]) : null;
@@ -433,7 +446,62 @@ function rowToTask(r: Record<string, unknown>): Task {
     assigneeName: String(r.assignee_name || r.assignee_username || ""),
     timerStartedAt: iso(r.timer_started_at),
     timeSpentSeconds: Number(r.time_spent_seconds ?? 0),
+    noteCount: Number(r.note_count ?? 0),
   };
+}
+
+// ── Notes (shared per task) ──────────────────────────────────
+
+function rowToNote(r: Row): Note {
+  return {
+    id: String(r.id),
+    taskId: String(r.task_id),
+    authorId: String(r.author_id ?? ""),
+    authorName: String(r.author_name ?? ""),
+    body: String(r.body ?? ""),
+  };
+}
+
+export async function listNotes(taskId: string): Promise<Note[]> {
+  await ensureSchema();
+  const rows = await db()`
+    SELECT id, task_id, author_id, author_name, body
+    FROM notes WHERE task_id = ${taskId} ORDER BY created_at ASC`;
+  return rows.map(rowToNote);
+}
+
+export async function getNote(id: string): Promise<Note | null> {
+  await ensureSchema();
+  const rows = await db()`SELECT id, task_id, author_id, author_name, body FROM notes WHERE id = ${id}`;
+  return rows[0] ? rowToNote(rows[0]) : null;
+}
+
+export async function addNote(input: {
+  taskId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+}): Promise<Note> {
+  await ensureSchema();
+  const id = randomUUID();
+  const rows = await db()`
+    INSERT INTO notes (id, task_id, author_id, author_name, body)
+    VALUES (${id}, ${input.taskId}, ${input.authorId}, ${input.authorName}, ${input.body.trim()})
+    RETURNING id, task_id, author_id, author_name, body`;
+  return rowToNote(rows[0]);
+}
+
+export async function updateNote(id: string, body: string): Promise<Note | null> {
+  await ensureSchema();
+  const rows = await db()`
+    UPDATE notes SET body = ${body.trim()} WHERE id = ${id}
+    RETURNING id, task_id, author_id, author_name, body`;
+  return rows[0] ? rowToNote(rows[0]) : null;
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  await ensureSchema();
+  await db()`DELETE FROM notes WHERE id = ${id}`;
 }
 
 // ── Suggestions (from inbound email) ─────────────────────────
