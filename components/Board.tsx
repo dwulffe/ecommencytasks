@@ -425,7 +425,7 @@ interface ReportTask {
   title: string;
   clientName: string;
   assigneeId: string;
-  completedAt: string;
+  done: boolean;
   timeSpentSeconds: number;
 }
 
@@ -480,7 +480,7 @@ function ReportModal({ onClose }: { onClose: () => void }) {
         <div className="modal-head">
           <div>
             <h2 className="modal-title">Time report</h2>
-            <div className="modal-sub">Hours logged per person on tasks completed in the range.</div>
+            <div className="modal-sub">Time logged per person in the range — tasks don’t need to be closed.</div>
           </div>
           <button className="kill modal-close" onClick={onClose} title="Close">
             ×
@@ -522,7 +522,7 @@ function ReportModal({ onClose }: { onClose: () => void }) {
           {loading ? (
             <div className="report-empty">Loading…</div>
           ) : rows.length === 0 ? (
-            <div className="report-empty">No completed tasks with logged time in this range.</div>
+            <div className="report-empty">No time logged in this range yet.</div>
           ) : (
             <table className="report-table">
               <thead>
@@ -556,7 +556,7 @@ function ReportModal({ onClose }: { onClose: () => void }) {
                         (mine.length === 0 ? (
                           <tr className="report-subrow">
                             <td colSpan={3} className="subtask-empty">
-                              No completed tasks in this range.
+                              No tasks in this range.
                             </td>
                           </tr>
                         ) : (
@@ -566,7 +566,7 @@ function ReportModal({ onClose }: { onClose: () => void }) {
                                 <div className="subtask-title">{t.title}</div>
                                 <div className="subtask-meta">
                                   {t.clientName ? `${t.clientName} · ` : ""}
-                                  completed {shortDate(t.completedAt)}
+                                  {t.done ? "completed" : "in progress"}
                                 </div>
                               </td>
                               <td />
@@ -1238,12 +1238,6 @@ function lastMonthStart(): string {
 function lastMonthEnd(): string {
   const d = new Date();
   return localDate(new Date(d.getFullYear(), d.getMonth(), 0)); // day 0 = last day of prev month
-}
-
-function shortDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function dueSortValue(dueDate: string): number {

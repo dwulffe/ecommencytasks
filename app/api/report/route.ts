@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, reportByUser, reportCompletedTasks } from "@/lib/db";
+import { getCurrentUser, reportByUser, reportTasks } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     }
     const [rows, tasks] = await Promise.all([
       reportByUser(start, end),
-      reportCompletedTasks(start, end),
+      reportTasks(start, end),
     ]);
     return NextResponse.json({ rows, tasks });
   } catch (err) {

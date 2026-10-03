@@ -22,7 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const action = body?.action;
     const updated =
       action === "start"
-        ? await startTimer(params.id)
+        ? await startTimer(params.id, me.id)
         : action === "pause"
         ? await pauseTimer(params.id)
         : null;

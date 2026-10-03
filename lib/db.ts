@@ -104,6 +104,20 @@ function ensureSchema(): Promise<void> {
           created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
 
+      // Individual timer runs, so time can be reported by period regardless of
+      // whether the task is ever completed. ended_at IS NULL means running.
+      await sql`
+        CREATE TABLE IF NOT EXISTS time_entries (
+          id          TEXT PRIMARY KEY,
+          task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          user_id     TEXT,
+          started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+          ended_at    TIMESTAMPTZ,
+          seconds     INTEGER NOT NULL DEFAULT 0
+        )`;
+      await sql`CREATE INDEX IF NOT EXISTS time_entries_started_idx ON time_entries (started_at)`;
+      await backfillTimeEntries(sql);
+
       await ensureAdmin(sql);
     })().catch((err) => {
       // Reset so a later request can retry after a transient failure.
@@ -139,6 +153,25 @@ function rowToUser(r: Row): User {
     role: normalizeRole(String(r.role)),
     createdAt: iso(r.created_at),
   };
+}
+
+/**
+ * One-time backfill: if there are no time entries yet but tasks already have
+ * logged time (from the pre-entries version), create one synthetic entry per
+ * task so historical totals still appear in the report, bucketed to the task's
+ * completion date (or creation date if never completed).
+ */
+async function backfillTimeEntries(sql: SqlTag): Promise<void> {
+  const existing = await sql`SELECT 1 FROM time_entries LIMIT 1`;
+  if (existing.length > 0) return;
+  await sql`
+    INSERT INTO time_entries (id, task_id, user_id, started_at, ended_at, seconds)
+    SELECT gen_random_uuid()::text, t.id, t.assignee_id,
+           COALESCE(t.completed_at, t.created_at),
+           COALESCE(t.completed_at, t.created_at),
+           t.time_spent_seconds
+    FROM tasks t
+    WHERE t.time_spent_seconds > 0`;
 }
 
 /**
@@ -332,6 +365,7 @@ export async function updateTask(
             + COALESCE(FLOOR(EXTRACT(EPOCH FROM (now() - timer_started_at)))::int, 0),
           timer_started_at = NULL
         WHERE id = ${id}`;
+      await closeOpenEntry(sql, id);
     } else {
       await sql`UPDATE tasks SET done = false, completed_at = NULL WHERE id = ${id}`;
     }
@@ -340,24 +374,42 @@ export async function updateTask(
   return getTask(id);
 }
 
+/** Close any running time entry for a task, banking its elapsed seconds. */
+async function closeOpenEntry(sql: SqlTag, taskId: string): Promise<void> {
+  await sql`
+    UPDATE time_entries SET
+      ended_at = now(),
+      seconds = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - started_at)))::int)
+    WHERE task_id = ${taskId} AND ended_at IS NULL`;
+}
+
 /** Start the timer (only if the task is open and not already running). */
-export async function startTimer(id: string): Promise<Task | null> {
+export async function startTimer(id: string, userId: string): Promise<Task | null> {
   await ensureSchema();
-  await db()`
+  const sql = db();
+  const started = await sql`
     UPDATE tasks SET timer_started_at = now()
-    WHERE id = ${id} AND done = false AND timer_started_at IS NULL`;
+    WHERE id = ${id} AND done = false AND timer_started_at IS NULL
+    RETURNING id`;
+  if (started.length > 0) {
+    await sql`
+      INSERT INTO time_entries (id, task_id, user_id, started_at)
+      VALUES (${randomUUID()}, ${id}, ${userId || null}, now())`;
+  }
   return getTask(id);
 }
 
 /** Pause the timer: bank the elapsed interval and stop the clock. */
 export async function pauseTimer(id: string): Promise<Task | null> {
   await ensureSchema();
-  await db()`
+  const sql = db();
+  await sql`
     UPDATE tasks SET
       time_spent_seconds = time_spent_seconds
         + COALESCE(FLOOR(EXTRACT(EPOCH FROM (now() - timer_started_at)))::int, 0),
       timer_started_at = NULL
     WHERE id = ${id} AND timer_started_at IS NOT NULL`;
+  await closeOpenEntry(sql, id);
   return getTask(id);
 }
 
@@ -374,26 +426,26 @@ export interface ReportRow {
 }
 
 /**
- * Time logged per person on tasks COMPLETED within [start, end] (inclusive,
- * dates as YYYY-MM-DD). Time is bucketed by each task's completion date, since
- * that's the only timestamp we have for a task's total logged time.
+ * Time logged per person within [start, end] (dates YYYY-MM-DD), summed from
+ * time entries and bucketed by the day each entry started — so time counts
+ * whether or not the task was ever completed. Running timers count up to now.
  */
 export async function reportByUser(start: string, end: string): Promise<ReportRow[]> {
   await ensureSchema();
   const rows = await db()`
-    SELECT t.assignee_id, u.name, u.username,
-           COALESCE(SUM(t.time_spent_seconds), 0)::int AS total_seconds,
-           COUNT(*)::int AS task_count
-    FROM tasks t
-    LEFT JOIN users u ON u.id = t.assignee_id
-    WHERE t.done = true
-      AND t.completed_at IS NOT NULL
-      AND t.completed_at::date >= ${start}::date
-      AND t.completed_at::date <= ${end}::date
-    GROUP BY t.assignee_id, u.name, u.username
+    SELECT e.user_id, u.name, u.username,
+           COALESCE(SUM(CASE WHEN e.ended_at IS NULL
+                             THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
+                             ELSE e.seconds END), 0)::int AS total_seconds,
+           COUNT(DISTINCT e.task_id)::int AS task_count
+    FROM time_entries e
+    LEFT JOIN users u ON u.id = e.user_id
+    WHERE e.started_at::date >= ${start}::date
+      AND e.started_at::date <= ${end}::date
+    GROUP BY e.user_id, u.name, u.username
     ORDER BY total_seconds DESC`;
   return rows.map((r) => ({
-    assigneeId: r.assignee_id ? String(r.assignee_id) : "",
+    assigneeId: r.user_id ? String(r.user_id) : "",
     name: String(r.name || r.username || "Unassigned"),
     taskCount: Number(r.task_count ?? 0),
     totalSeconds: Number(r.total_seconds ?? 0),
@@ -405,30 +457,32 @@ export interface ReportTask {
   title: string;
   clientName: string;
   assigneeId: string;
-  completedAt: string;
+  done: boolean;
   timeSpentSeconds: number;
 }
 
-/** The individual tasks completed within [start, end], for the report drill-down. */
-export async function reportCompletedTasks(start: string, end: string): Promise<ReportTask[]> {
+/** The tasks each person logged time on within [start, end], for the drill-down. */
+export async function reportTasks(start: string, end: string): Promise<ReportTask[]> {
   await ensureSchema();
   const rows = await db()`
-    SELECT t.id, t.title, t.assignee_id, t.time_spent_seconds, t.completed_at,
-           c.name AS client_name
-    FROM tasks t
+    SELECT e.user_id, e.task_id, t.title, t.done, c.name AS client_name,
+           COALESCE(SUM(CASE WHEN e.ended_at IS NULL
+                             THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
+                             ELSE e.seconds END), 0)::int AS seconds
+    FROM time_entries e
+    LEFT JOIN tasks t ON t.id = e.task_id
     LEFT JOIN clients c ON c.id = t.client_id
-    WHERE t.done = true
-      AND t.completed_at IS NOT NULL
-      AND t.completed_at::date >= ${start}::date
-      AND t.completed_at::date <= ${end}::date
-    ORDER BY t.completed_at DESC`;
+    WHERE e.started_at::date >= ${start}::date
+      AND e.started_at::date <= ${end}::date
+    GROUP BY e.user_id, e.task_id, t.title, t.done, c.name
+    ORDER BY seconds DESC`;
   return rows.map((r) => ({
-    id: String(r.id),
-    title: String(r.title),
+    id: String(r.task_id),
+    title: String(r.title ?? ""),
     clientName: String(r.client_name || ""),
-    assigneeId: r.assignee_id ? String(r.assignee_id) : "",
-    completedAt: iso(r.completed_at),
-    timeSpentSeconds: Number(r.time_spent_seconds ?? 0),
+    assigneeId: r.user_id ? String(r.user_id) : "",
+    done: r.done === true,
+    timeSpentSeconds: Number(r.seconds ?? 0),
   }));
 }
 
