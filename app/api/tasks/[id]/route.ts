@@ -14,12 +14,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
     const body = await req.json();
-    const patch: Partial<Pick<Task, "title" | "priority" | "dueDate" | "done" | "assigneeId">> = {};
+    const patch: Partial<Pick<Task, "title" | "priority" | "dueDate" | "done" | "assigneeId" | "clientId">> = {};
 
     if (me.role === "admin") {
       if (typeof body?.title === "string") patch.title = body.title;
       if (typeof body?.dueDate === "string") patch.dueDate = body.dueDate;
       if (typeof body?.assigneeId === "string") patch.assigneeId = body.assigneeId;
+      if (typeof body?.clientId === "string" && body.clientId) patch.clientId = body.clientId;
       if (PRIORITIES.includes(body?.priority)) patch.priority = body.priority as Priority;
       if (typeof body?.done === "boolean") patch.done = body.done;
     } else {

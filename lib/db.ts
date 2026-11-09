@@ -337,13 +337,16 @@ export async function addTask(input: {
 
 export async function updateTask(
   id: string,
-  patch: Partial<Pick<Task, "title" | "priority" | "dueDate" | "done" | "assigneeId">>
+  patch: Partial<Pick<Task, "title" | "priority" | "dueDate" | "done" | "assigneeId" | "clientId">>
 ): Promise<Task | null> {
   await ensureSchema();
   const sql = db();
 
   if (patch.title !== undefined) {
     await sql`UPDATE tasks SET title = ${patch.title.trim()} WHERE id = ${id}`;
+  }
+  if (patch.clientId !== undefined && patch.clientId) {
+    await sql`UPDATE tasks SET client_id = ${patch.clientId} WHERE id = ${id}`;
   }
   if (patch.priority !== undefined) {
     await sql`UPDATE tasks SET priority = ${patch.priority} WHERE id = ${id}`;

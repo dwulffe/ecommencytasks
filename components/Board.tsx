@@ -389,6 +389,7 @@ export function Board() {
                   meId={me?.id || ""}
                   showClient={!isAdmin || selected === "all"}
                   clientName={clientName.get(t.clientId) || ""}
+                  clients={clients}
                   employees={employees}
                   assigneeName={t.assigneeName || userName(t.assigneeId)}
                   onToggle={() => patchTask(t.id, { done: !t.done })}
@@ -396,6 +397,7 @@ export function Board() {
                   onDue={(d) => patchTask(t.id, { dueDate: d })}
                   onRename={(title) => title.trim() && patchTask(t.id, { title })}
                   onAssign={(assigneeId) => patchTask(t.id, { assigneeId })}
+                  onClientChange={(clientId) => patchTask(t.id, { clientId })}
                   onTimer={(action) => timerAction(t.id, action)}
                   onDelete={() => removeTask(t.id)}
                 />
@@ -787,6 +789,7 @@ function TaskRow({
   meId,
   showClient,
   clientName,
+  clients,
   employees,
   assigneeName,
   onToggle,
@@ -794,6 +797,7 @@ function TaskRow({
   onDue,
   onRename,
   onAssign,
+  onClientChange,
   onTimer,
   onDelete,
 }: {
@@ -803,6 +807,7 @@ function TaskRow({
   meId: string;
   showClient: boolean;
   clientName: string;
+  clients: Client[];
   employees: User[];
   assigneeName: string;
   onToggle: () => void;
@@ -810,6 +815,7 @@ function TaskRow({
   onDue: (d: string) => void;
   onRename: (title: string) => void;
   onAssign: (assigneeId: string) => void;
+  onClientChange: (clientId: string) => void;
   onTimer: (action: "start" | "pause") => void;
   onDelete: () => void;
 }) {
@@ -878,23 +884,39 @@ function TaskRow({
         )}
 
         <div className="task-subline">
-          {showClient && clientName && <span>{clientName}</span>}
           {isAdmin ? (
-            <select
-              className="assignee-select"
-              value={task.assigneeId}
-              onChange={(e) => onAssign(e.target.value)}
-              title="Assign to"
-            >
-              <option value="">Unassigned</option>
-              {employees.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name || u.username}
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                className="assignee-select"
+                value={task.clientId}
+                onChange={(e) => onClientChange(e.target.value)}
+                title="Client"
+              >
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="assignee-select"
+                value={task.assigneeId}
+                onChange={(e) => onAssign(e.target.value)}
+                title="Assign to"
+              >
+                <option value="">Unassigned</option>
+                {employees.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name || u.username}
+                  </option>
+                ))}
+              </select>
+            </>
           ) : (
-            assigneeName && <span className="assignee-chip">{assigneeName}</span>
+            <>
+              {showClient && clientName && <span>{clientName}</span>}
+              {assigneeName && <span className="assignee-chip">{assigneeName}</span>}
+            </>
           )}
         </div>
 
