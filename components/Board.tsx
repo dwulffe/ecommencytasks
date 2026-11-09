@@ -346,11 +346,9 @@ export function Board() {
                 <option value="due">Sort: Due date</option>
                 <option value="added">Sort: Newest</option>
               </select>
-              {isAdmin && (
-                <button className="btn ghost" onClick={() => setReportOpen(true)}>
-                  ⏱ Time report
-                </button>
-              )}
+              <button className="btn ghost" onClick={() => setReportOpen(true)}>
+                ⏱ Time report
+              </button>
             </div>
           </div>
 
@@ -407,7 +405,7 @@ export function Board() {
         </main>
       </div>
 
-      {reportOpen && <ReportModal onClose={() => setReportOpen(false)} />}
+      {reportOpen && <ReportModal isAdmin={!!isAdmin} onClose={() => setReportOpen(false)} />}
       {error && <div className="toast">{error}</div>}
     </div>
   );
@@ -429,7 +427,7 @@ interface ReportTask {
   timeSpentSeconds: number;
 }
 
-function ReportModal({ onClose }: { onClose: () => void }) {
+function ReportModal({ isAdmin, onClose }: { isAdmin: boolean; onClose: () => void }) {
   const [start, setStart] = useState(() => monthStart());
   const [end, setEnd] = useState(() => localDate(new Date()));
   const [rows, setRows] = useState<ReportRow[]>([]);
@@ -480,7 +478,11 @@ function ReportModal({ onClose }: { onClose: () => void }) {
         <div className="modal-head">
           <div>
             <h2 className="modal-title">Time report</h2>
-            <div className="modal-sub">Time logged per person in the range — tasks don’t need to be closed.</div>
+            <div className="modal-sub">
+              {isAdmin
+                ? "Time logged per person in the range — tasks don’t need to be closed."
+                : "Your time logged in the range — tasks don’t need to be closed."}
+            </div>
           </div>
           <button className="kill modal-close" onClick={onClose} title="Close">
             ×

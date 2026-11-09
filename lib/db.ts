@@ -430,20 +430,39 @@ export interface ReportRow {
  * time entries and bucketed by the day each entry started — so time counts
  * whether or not the task was ever completed. Running timers count up to now.
  */
-export async function reportByUser(start: string, end: string): Promise<ReportRow[]> {
+export async function reportByUser(
+  start: string,
+  end: string,
+  userId?: string
+): Promise<ReportRow[]> {
   await ensureSchema();
-  const rows = await db()`
-    SELECT e.user_id, u.name, u.username,
-           COALESCE(SUM(CASE WHEN e.ended_at IS NULL
-                             THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
-                             ELSE e.seconds END), 0)::int AS total_seconds,
-           COUNT(DISTINCT e.task_id)::int AS task_count
-    FROM time_entries e
-    LEFT JOIN users u ON u.id = e.user_id
-    WHERE e.started_at::date >= ${start}::date
-      AND e.started_at::date <= ${end}::date
-    GROUP BY e.user_id, u.name, u.username
-    ORDER BY total_seconds DESC`;
+  const sql = db();
+  const rows = userId
+    ? await sql`
+        SELECT e.user_id, u.name, u.username,
+               COALESCE(SUM(CASE WHEN e.ended_at IS NULL
+                                 THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
+                                 ELSE e.seconds END), 0)::int AS total_seconds,
+               COUNT(DISTINCT e.task_id)::int AS task_count
+        FROM time_entries e
+        LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.user_id = ${userId}
+          AND e.started_at::date >= ${start}::date
+          AND e.started_at::date <= ${end}::date
+        GROUP BY e.user_id, u.name, u.username
+        ORDER BY total_seconds DESC`
+    : await sql`
+        SELECT e.user_id, u.name, u.username,
+               COALESCE(SUM(CASE WHEN e.ended_at IS NULL
+                                 THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
+                                 ELSE e.seconds END), 0)::int AS total_seconds,
+               COUNT(DISTINCT e.task_id)::int AS task_count
+        FROM time_entries e
+        LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.started_at::date >= ${start}::date
+          AND e.started_at::date <= ${end}::date
+        GROUP BY e.user_id, u.name, u.username
+        ORDER BY total_seconds DESC`;
   return rows.map((r) => ({
     assigneeId: r.user_id ? String(r.user_id) : "",
     name: String(r.name || r.username || "Unassigned"),
@@ -462,20 +481,39 @@ export interface ReportTask {
 }
 
 /** The tasks each person logged time on within [start, end], for the drill-down. */
-export async function reportTasks(start: string, end: string): Promise<ReportTask[]> {
+export async function reportTasks(
+  start: string,
+  end: string,
+  userId?: string
+): Promise<ReportTask[]> {
   await ensureSchema();
-  const rows = await db()`
-    SELECT e.user_id, e.task_id, t.title, t.done, c.name AS client_name,
-           COALESCE(SUM(CASE WHEN e.ended_at IS NULL
-                             THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
-                             ELSE e.seconds END), 0)::int AS seconds
-    FROM time_entries e
-    LEFT JOIN tasks t ON t.id = e.task_id
-    LEFT JOIN clients c ON c.id = t.client_id
-    WHERE e.started_at::date >= ${start}::date
-      AND e.started_at::date <= ${end}::date
-    GROUP BY e.user_id, e.task_id, t.title, t.done, c.name
-    ORDER BY seconds DESC`;
+  const sql = db();
+  const rows = userId
+    ? await sql`
+        SELECT e.user_id, e.task_id, t.title, t.done, c.name AS client_name,
+               COALESCE(SUM(CASE WHEN e.ended_at IS NULL
+                                 THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
+                                 ELSE e.seconds END), 0)::int AS seconds
+        FROM time_entries e
+        LEFT JOIN tasks t ON t.id = e.task_id
+        LEFT JOIN clients c ON c.id = t.client_id
+        WHERE e.user_id = ${userId}
+          AND e.started_at::date >= ${start}::date
+          AND e.started_at::date <= ${end}::date
+        GROUP BY e.user_id, e.task_id, t.title, t.done, c.name
+        ORDER BY seconds DESC`
+    : await sql`
+        SELECT e.user_id, e.task_id, t.title, t.done, c.name AS client_name,
+               COALESCE(SUM(CASE WHEN e.ended_at IS NULL
+                                 THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::int)
+                                 ELSE e.seconds END), 0)::int AS seconds
+        FROM time_entries e
+        LEFT JOIN tasks t ON t.id = e.task_id
+        LEFT JOIN clients c ON c.id = t.client_id
+        WHERE e.started_at::date >= ${start}::date
+          AND e.started_at::date <= ${end}::date
+        GROUP BY e.user_id, e.task_id, t.title, t.done, c.name
+        ORDER BY seconds DESC`;
   return rows.map((r) => ({
     id: String(r.task_id),
     title: String(r.title ?? ""),
