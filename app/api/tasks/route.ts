@@ -20,16 +20,19 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const me = await getCurrentUser();
   if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (me.role !== "admin") {
-    return NextResponse.json({ error: "Only admins can add tasks" }, { status: 403 });
-  }
   try {
     const body = await req.json();
     const clientId = typeof body?.clientId === "string" ? body.clientId : "";
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     const priority: Priority = PRIORITIES.includes(body?.priority) ? body.priority : "Medium";
     const dueDate = typeof body?.dueDate === "string" ? body.dueDate : "";
-    const assigneeId = typeof body?.assigneeId === "string" ? body.assigneeId : "";
+    // Admins can assign to anyone; employees' tasks are always assigned to themselves.
+    const assigneeId =
+      me.role === "admin"
+        ? typeof body?.assigneeId === "string"
+          ? body.assigneeId
+          : ""
+        : me.id;
 
     if (!clientId) return NextResponse.json({ error: "clientId is required" }, { status: 400 });
     if (!title) return NextResponse.json({ error: "Task title is required" }, { status: 400 });

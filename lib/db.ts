@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "crypto";
-import { Client, Task, Suggestion, User, Note, Role, Priority, PRIORITIES } from "./types";
+import { Client, Task, Suggestion, User, Note, Screenshot, Role, Priority, PRIORITIES } from "./types";
 import { hashPassword, verifyPassword, sessionUserId } from "./auth";
 
 /**
@@ -117,6 +117,17 @@ function ensureSchema(): Promise<void> {
         )`;
       await sql`CREATE INDEX IF NOT EXISTS time_entries_started_idx ON time_entries (started_at)`;
       await backfillTimeEntries(sql);
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS screenshots (
+          id               TEXT PRIMARY KEY,
+          task_id          TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          url              TEXT NOT NULL,
+          pathname         TEXT NOT NULL DEFAULT '',
+          uploaded_by_id   TEXT NOT NULL DEFAULT '',
+          uploaded_by_name TEXT NOT NULL DEFAULT '',
+          created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
 
       await ensureAdmin(sql);
     })().catch((err) => {
@@ -297,13 +308,15 @@ export async function listTasks(opts?: { assigneeId?: string }): Promise<Task[]>
   const rows = opts?.assigneeId
     ? await sql`
         SELECT t.*, u.name AS assignee_name, u.username AS assignee_username,
-               (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count
+               (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count,
+               (SELECT COUNT(*) FROM screenshots s WHERE s.task_id = t.id) AS screenshot_count
         FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
         WHERE t.assignee_id = ${opts.assigneeId}
         ORDER BY t.created_at DESC`
     : await sql`
         SELECT t.*, u.name AS assignee_name, u.username AS assignee_username,
-               (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count
+               (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count,
+               (SELECT COUNT(*) FROM screenshots s WHERE s.task_id = t.id) AS screenshot_count
         FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
         ORDER BY t.created_at DESC`;
   return rows.map(rowToTask);
@@ -313,7 +326,8 @@ export async function getTask(id: string): Promise<Task | null> {
   await ensureSchema();
   const rows = await db()`
     SELECT t.*, u.name AS assignee_name, u.username AS assignee_username,
-           (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count
+           (SELECT COUNT(*) FROM notes n WHERE n.task_id = t.id) AS note_count,
+           (SELECT COUNT(*) FROM screenshots s WHERE s.task_id = t.id) AS screenshot_count
     FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id
     WHERE t.id = ${id}`;
   return rows[0] ? rowToTask(rows[0]) : null;
@@ -542,6 +556,7 @@ function rowToTask(r: Record<string, unknown>): Task {
     timerStartedAt: iso(r.timer_started_at),
     timeSpentSeconds: Number(r.time_spent_seconds ?? 0),
     noteCount: Number(r.note_count ?? 0),
+    screenshotCount: Number(r.screenshot_count ?? 0),
   };
 }
 
@@ -597,6 +612,57 @@ export async function updateNote(id: string, body: string): Promise<Note | null>
 export async function deleteNote(id: string): Promise<void> {
   await ensureSchema();
   await db()`DELETE FROM notes WHERE id = ${id}`;
+}
+
+// ── Screenshots (stored in Vercel Blob; we keep the URLs) ────
+
+function rowToScreenshot(r: Row): Screenshot {
+  return {
+    id: String(r.id),
+    taskId: String(r.task_id),
+    url: String(r.url),
+    pathname: String(r.pathname ?? ""),
+    uploadedById: String(r.uploaded_by_id ?? ""),
+    uploadedByName: String(r.uploaded_by_name ?? ""),
+  };
+}
+
+export async function listScreenshots(taskId: string): Promise<Screenshot[]> {
+  await ensureSchema();
+  const rows = await db()`
+    SELECT id, task_id, url, pathname, uploaded_by_id, uploaded_by_name
+    FROM screenshots WHERE task_id = ${taskId} ORDER BY created_at ASC`;
+  return rows.map(rowToScreenshot);
+}
+
+export async function getScreenshot(id: string): Promise<Screenshot | null> {
+  await ensureSchema();
+  const rows = await db()`
+    SELECT id, task_id, url, pathname, uploaded_by_id, uploaded_by_name
+    FROM screenshots WHERE id = ${id}`;
+  return rows[0] ? rowToScreenshot(rows[0]) : null;
+}
+
+export async function addScreenshot(input: {
+  taskId: string;
+  url: string;
+  pathname: string;
+  uploadedById: string;
+  uploadedByName: string;
+}): Promise<Screenshot> {
+  await ensureSchema();
+  const id = randomUUID();
+  const rows = await db()`
+    INSERT INTO screenshots (id, task_id, url, pathname, uploaded_by_id, uploaded_by_name)
+    VALUES (${id}, ${input.taskId}, ${input.url}, ${input.pathname},
+            ${input.uploadedById}, ${input.uploadedByName})
+    RETURNING id, task_id, url, pathname, uploaded_by_id, uploaded_by_name`;
+  return rowToScreenshot(rows[0]);
+}
+
+export async function deleteScreenshot(id: string): Promise<void> {
+  await ensureSchema();
+  await db()`DELETE FROM screenshots WHERE id = ${id}`;
 }
 
 // ── Suggestions (from inbound email) ─────────────────────────

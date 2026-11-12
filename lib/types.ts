@@ -53,6 +53,8 @@ export interface Task {
   timeSpentSeconds: number;
   /** How many notes are attached (for the collapsed badge). */
   noteCount: number;
+  /** How many screenshots are attached (for the collapsed badge). */
+  screenshotCount: number;
 }
 
 export interface Note {
@@ -61,4 +63,13 @@ export interface Note {
   authorId: string;
   authorName: string;
   body: string;
+}
+
+export interface Screenshot {
+  id: string;
+  taskId: string;
+  url: string;
+  pathname: string;
+  uploadedById: string;
+  uploadedByName: string;
 }

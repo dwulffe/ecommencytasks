@@ -2,8 +2,9 @@
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 import { Logo } from "./Logo";
-import { Client, Task, Suggestion, User, Note, Priority, Role, PRIORITIES } from "@/lib/types";
+import { Client, Task, Suggestion, User, Note, Screenshot, Priority, Role, PRIORITIES } from "@/lib/types";
 
 type Filter = "open" | "overdue" | "completed" | "all";
 type Sort = "priority" | "due" | "added";
@@ -155,10 +156,12 @@ export function Board() {
     title: string;
     priority: Priority;
     dueDate: string;
-    assigneeId: string;
+    assigneeId?: string;
+    clientId?: string;
   }) {
-    const clientId = selected === "all" ? clients[0]?.id : selected;
-    if (!clientId) return flashError("Add a client first");
+    // Employees pass an explicit clientId; admins use the selected client.
+    const clientId = input.clientId || (selected === "all" ? clients[0]?.id : selected);
+    if (!clientId) return flashError("Pick a client first");
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -354,6 +357,10 @@ export function Board() {
 
           {isAdmin && clients.length > 0 && (
             <AddTask key={selected} employees={employees} onAdd={addTask} />
+          )}
+
+          {!isAdmin && clients.length > 0 && (
+            <AddTask employeeMode clients={clients} employees={employees} onAdd={addTask} />
           )}
 
           {isAdmin && visibleSuggestions.length > 0 && (
@@ -725,14 +732,25 @@ function Team({
 function AddTask({
   onAdd,
   employees,
+  clients,
+  employeeMode,
 }: {
-  onAdd: (input: { title: string; priority: Priority; dueDate: string; assigneeId: string }) => void;
+  onAdd: (input: {
+    title: string;
+    priority: Priority;
+    dueDate: string;
+    assigneeId?: string;
+    clientId?: string;
+  }) => void;
   employees: User[];
+  clients?: Client[];
+  employeeMode?: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Priority>("Medium");
   const [dueDate, setDueDate] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
+  const [clientId, setClientId] = useState("");
 
   return (
     <form
@@ -740,11 +758,18 @@ function AddTask({
       onSubmit={(e) => {
         e.preventDefault();
         if (!title.trim()) return;
-        onAdd({ title: title.trim(), priority, dueDate, assigneeId });
+        if (employeeMode && !clientId) return;
+        onAdd({
+          title: title.trim(),
+          priority,
+          dueDate,
+          ...(employeeMode ? { clientId } : { assigneeId }),
+        });
         setTitle("");
         setPriority("Medium");
         setDueDate("");
         setAssigneeId("");
+        setClientId("");
       }}
     >
       <AutoTextarea
@@ -759,14 +784,25 @@ function AddTask({
           }
         }}
       />
-      <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} title="Assign to">
-        <option value="">Unassigned</option>
-        {employees.map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.name || u.username}
-          </option>
-        ))}
-      </select>
+      {employeeMode ? (
+        <select value={clientId} onChange={(e) => setClientId(e.target.value)} title="Client" required>
+          <option value="">Client…</option>
+          {(clients || []).map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} title="Assign to">
+          <option value="">Unassigned</option>
+          {employees.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name || u.username}
+            </option>
+          ))}
+        </select>
+      )}
       <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>
         {PRIORITIES.map((p) => (
           <option key={p} value={p}>
@@ -775,7 +811,7 @@ function AddTask({
         ))}
       </select>
       <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-      <button className="btn" type="submit" disabled={!title.trim()}>
+      <button className="btn" type="submit" disabled={!title.trim() || (employeeMode && !clientId)}>
         Add task
       </button>
     </form>
@@ -928,6 +964,12 @@ function TaskRow({
         )}
 
         <TaskNotes taskId={task.id} initialCount={task.noteCount} meId={meId} isAdmin={isAdmin} />
+        <TaskScreenshots
+          taskId={task.id}
+          initialCount={task.screenshotCount}
+          meId={meId}
+          isAdmin={isAdmin}
+        />
       </div>
 
       <div className="task-meta">
@@ -1119,6 +1161,148 @@ function TaskNotes({
               Add
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskScreenshots({
+  taskId,
+  initialCount,
+  meId,
+  isAdmin,
+}: {
+  taskId: string;
+  initialCount: number;
+  meId: string;
+  isAdmin: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [shots, setShots] = useState<Screenshot[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [count, setCount] = useState(initialCount);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function load() {
+    const res = await fetch(`/api/tasks/${taskId}/screenshots`);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setShots(data.screenshots || []);
+      setCount((data.screenshots || []).length);
+      setLoaded(true);
+    }
+  }
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) load();
+  }
+
+  async function uploadFiles(files: File[]) {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return;
+    setErr("");
+    setBusy(true);
+    try {
+      for (const file of images) {
+        const name = file.name || `screenshot-${Date.now()}.png`;
+        const blob = await upload(name, file, {
+          access: "public",
+          handleUploadUrl: `/api/tasks/${taskId}/blob-token`,
+        });
+        const res = await fetch(`/api/tasks/${taskId}/screenshots`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: blob.url, pathname: blob.pathname }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.screenshot) {
+          setShots((p) => [...p, data.screenshot]);
+          setCount((c) => c + 1);
+        } else {
+          setErr(data.error || "Upload failed");
+        }
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    setShots((p) => p.filter((s) => s.id !== id));
+    setCount((c) => Math.max(0, c - 1));
+    await fetch(`/api/screenshots/${id}`, { method: "DELETE" });
+  }
+
+  const canDelete = (s: Screenshot) => isAdmin || s.uploadedById === meId;
+
+  return (
+    <div className="notes">
+      <button className="notes-toggle" onClick={toggle}>
+        Screenshots{count > 0 ? ` (${count})` : ""}
+        <span className="chev">{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div className="shots-panel">
+          <div
+            className={`shots-drop ${busy ? "busy" : ""}`}
+            tabIndex={0}
+            onClick={() => fileRef.current?.click()}
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              const files: File[] = [];
+              for (const it of Array.from(items)) {
+                if (it.type.startsWith("image/")) {
+                  const f = it.getAsFile();
+                  if (f) files.push(f);
+                }
+              }
+              if (files.length) {
+                e.preventDefault();
+                uploadFiles(files);
+              }
+            }}
+          >
+            {busy ? "Uploading…" : "Click to upload, or paste a screenshot here"}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) uploadFiles(Array.from(e.target.files));
+                e.target.value = "";
+              }}
+            />
+          </div>
+
+          {err && <div className="report-err">{err}</div>}
+
+          {shots.length > 0 && (
+            <div className="shots-grid">
+              {shots.map((s) => (
+                <div className="shot" key={s.id}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer" title="Open full size">
+                    <img src={s.url} alt="screenshot" loading="lazy" />
+                  </a>
+                  {canDelete(s) && (
+                    <button className="shot-del" title="Delete" onClick={() => remove(s.id)}>
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
