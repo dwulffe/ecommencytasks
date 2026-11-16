@@ -28,6 +28,8 @@ export function Board() {
   const [selected, setSelected] = useState<string | "all">("all");
   const [filter, setFilter] = useState<Filter>("open");
   const [sort, setSort] = useState<Sort>("priority");
+  const [completedFrom, setCompletedFrom] = useState("");
+  const [completedTo, setCompletedTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -107,6 +109,17 @@ export function Board() {
     else if (filter === "overdue")
       list = list.filter((t) => !t.done && t.dueDate && t.dueDate < today);
 
+    // On the Completed tab, optionally narrow to a completion-date range.
+    if (filter === "completed" && (completedFrom || completedTo)) {
+      list = list.filter((t) => {
+        const d = t.completedAt ? t.completedAt.slice(0, 10) : "";
+        if (!d) return false;
+        if (completedFrom && d < completedFrom) return false;
+        if (completedTo && d > completedTo) return false;
+        return true;
+      });
+    }
+
     const sorted = [...list].sort((a, b) => {
       if (sort === "priority") {
         if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority])
@@ -117,7 +130,7 @@ export function Board() {
       return a.createdAt < b.createdAt ? 1 : -1;
     });
     return sorted.sort((a, b) => Number(a.done) - Number(b.done));
-  }, [tasks, selected, filter, sort, isAdmin, today]);
+  }, [tasks, selected, filter, sort, isAdmin, today, completedFrom, completedTo]);
 
   const selectedClient = clients.find((c) => c.id === selected);
   const clientName = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
@@ -354,6 +367,36 @@ export function Board() {
               </button>
             </div>
           </div>
+
+          {filter === "completed" && (
+            <div className="completed-range">
+              <span className="cr-label">Completed between</span>
+              <input
+                type="date"
+                value={completedFrom}
+                max={completedTo || undefined}
+                onChange={(e) => setCompletedFrom(e.target.value)}
+              />
+              <span className="range-dash">→</span>
+              <input
+                type="date"
+                value={completedTo}
+                min={completedFrom || undefined}
+                onChange={(e) => setCompletedTo(e.target.value)}
+              />
+              {(completedFrom || completedTo) && (
+                <button
+                  className="btn ghost cr-clear"
+                  onClick={() => {
+                    setCompletedFrom("");
+                    setCompletedTo("");
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
 
           {isAdmin && clients.length > 0 && (
             <AddTask key={selected} employees={employees} onAdd={addTask} />

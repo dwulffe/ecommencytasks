@@ -466,6 +466,32 @@ a {
   flex-wrap: wrap;
 }
 
+/* Completion date-range filter (Completed tab) */
+.completed-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cr-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.cr-clear {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
 .segmented {
   display: inline-flex;
   background: var(--panel);
